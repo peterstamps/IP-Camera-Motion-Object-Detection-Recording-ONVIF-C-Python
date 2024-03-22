@@ -41,6 +41,7 @@
 #include <cstring>
 #include <semaphore.h>
 #include <signal.h>
+#include <queue>
 
 using namespace cv;
 using namespace std;
@@ -73,19 +74,6 @@ struct DetectionResult {
     std::string confidence;
     cv::Rect boundingBox;
 };
-
-
-size_t callback(
-        const char* in,
-        size_t size,
-        size_t num,
-        string* out)
-{
-    const size_t totalBytes(size * num);
-    out->append(in, totalBytes);
-    return totalBytes;
-}
-
 
 
 const int BUFFER_SIZE = 2048;
@@ -127,27 +115,34 @@ void getTapoMessages(SharedMemory* sharedMemory) {
 
             PyTuple_SetItem(pArgs, 0, pTupleValue);
 
-            pValue = PyObject_CallObject(pFunc, pArgs);
-          
-            if (pValue != NULL) {
-                // Convert the result to a C string
-                const char* resultString = PyUnicode_AsUTF8(pValue);
-                if (resultString) {
-                    // Save the string value in a C++ variable
-                    savedString = resultString;
-                    // Print the saved string value
-                    // std::cout << "Saved string value: " << savedString << std::endl;
-                    //std::cout << savedString << std::endl;
-                }
-                Py_DECREF(pValue);
-            }
-            else {
-                Py_DECREF(pFunc);
-                Py_DECREF(pModule);
-                PyErr_Print();
-                fprintf(stderr,"Call failed\n");
-                //return;
-            }
+            while (true) {
+              pValue = PyObject_CallObject(pFunc, pArgs);
+            
+              if (pValue != NULL) {
+                  // Convert the result to a C string
+                  const char* resultString = PyUnicode_AsUTF8(pValue);
+                  if (resultString) {
+                      // Save the string value in a C++ variable
+                      savedString = resultString;
+                      // Print the saved string value
+                      // std::cout << "Saved string value: " << savedString << std::endl;
+                      //std::cout << savedString << std::endl;
+                      // Write result to shared memory
+                      sem_wait(&sharedMemory->mutex);
+                      //snprintf(sharedMemory->message, BUFFER_SIZE, "AsyncTask1: IntValue = %d, StringValue = %s", intValue, stringValue.c_str());
+                      snprintf(sharedMemory->message, BUFFER_SIZE, "%s", savedString);
+                      sem_post(&sharedMemory->mutex);                      
+                  }
+                  Py_DECREF(pValue);
+              }
+              else {
+                  Py_DECREF(pFunc);
+                  Py_DECREF(pModule);
+                  PyErr_Print();
+                  fprintf(stderr,"Call failed\n");
+                  //return;
+              }
+            } // END of while (true)
         }
         else {
             if (PyErr_Occurred())
@@ -163,18 +158,6 @@ void getTapoMessages(SharedMemory* sharedMemory) {
         //return;
     }
    
-
-    // savedString = callback2(savedString);
-    //return  prom.set_value(savedString);
-  
-    // Simulate another time-consuming operation
-    // sleep(2);
-
-    // Write result to shared memory
-    sem_wait(&sharedMemory->mutex);
-    //snprintf(sharedMemory->message, BUFFER_SIZE, "AsyncTask1: IntValue = %d, StringValue = %s", intValue, stringValue.c_str());
-    snprintf(sharedMemory->message, BUFFER_SIZE, "%s", savedString);
-    sem_post(&sharedMemory->mutex);
 }
 
 size_t write_data(void *ptr, size_t size, size_t nmemb, string *data) {
@@ -260,7 +243,7 @@ void postImageAndGetResponse(SharedMemory* sharedMemory, string& AIserverUrl, st
 
 
 int main() {
-    // Register signal and signal handler
+    // Register signal and signal handler. Used to check if CTRL-c has been pressed in console!
     signal(SIGINT, signal_callback_handler);  
     
     // Create shared memory for getTapoMessages
@@ -338,9 +321,10 @@ int main() {
         // The codec to be used for writing the videos
         string codecString = reader.Get("video_recording", "codec", "XVID");
         float maximum_recording_time = reader.GetFloat("video_recording", "maximum_recording_time", 2.5);
-
         // Record duration in seconds
         int record_duration = reader.GetInteger("video_recording", "record_duration", 10);
+        // Buffer x seconds the frames before a (new) motion is detected
+        int buffer_before_motion = reader.GetInteger("video_recording", "buffer_before_motion", 5);
         // Extra time to add to the record duration if new motion is detected
         int extra_record_time = reader.GetInteger("video_recording", "extra_record_time", 5);
         // Pre-motion recording duration in second. The time before recording should stop wiil be used to detect uf new motion happened.
@@ -374,10 +358,7 @@ int main() {
         // Show the result(s) from the response message from the AI Object Detection Service
         string curl_debug_message_on = reader.Get("object_detection", "curl_debug_message_on", "No");    // When No motion rectangles will be drawn on the screen around the moving objects
 
-
-
-
-        // Load the mask
+        // Load the mask. The black areas's in the mask are always excluded from Motion detection!
         Mat mask = imread(mask_path, IMREAD_GRAYSCALE);
         if (mask.empty()) {
             cout << "Error: Cannot load the mask image." << endl;
@@ -390,7 +371,6 @@ int main() {
         pid_t pid2 = fork();
         if (pid2 == 0) {
           postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  mask,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
-
           return 0; // required!
         } else if (pid2 > 0) {
           // Parent process (main)
@@ -437,9 +417,16 @@ int main() {
         time_t start_time = 0;
         time_t end_time = 0;
         int frameCounter = 0;
+        int teller = 0;
         int obj_detection_each_x_frames = fps * object_detection_time;
         
+         
         bool recording_on = false;
+        
+        int bufferSeconds = buffer_before_motion;
+        // Set buffer size in frames
+        int bufferSize = bufferSeconds * fps;
+        queue<Mat> frameBuffer;        
         
         while (true) {
             // Read frame from the camera
@@ -452,26 +439,31 @@ int main() {
             }
             frame_original = frame.clone();
             frameCounter += 1;
-            string str_frameCounter = to_string(frameCounter);
-             
+            string str_frameCounter = to_string(frameCounter);             
             time(&now);
             strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));
+                
+            // Add frame to buffer
+            frameBuffer.push(frame.clone());
+            // Maintain buffer size
+            if (frameBuffer.size() > bufferSize) {
+                frameBuffer.pop();  // removes first frame from buffer 
+            }            
+            
 
-          if (camera_event_detection_by_python != "Yes") {
-
-            // Apply the mask as an overlay
-            for (int i = 0; i < frame.rows; ++i) {
-                for (int j = 0; j < frame.cols; ++j) {
-                    if (mask.at<uchar>(i, j) != 0) {
-                        frame.at<Vec3b>(i, j) = Vec3b(0, 0, 0); // Black
-                    }
-                }
-            }
+            if (camera_event_detection_by_python != "Yes") {
+              // Apply the mask as an overlay
+              for (int i = 0; i < frame.rows; ++i) {
+                  for (int j = 0; j < frame.cols; ++j) {
+                      if (mask.at<uchar>(i, j) != 0) {
+                          frame.at<Vec3b>(i, j) = Vec3b(0, 0, 0); // Black
+                      }
+                  }
+              }
       
             // Apply background subtraction
             Mat fg_mask;
             back_sub->apply(frame, fg_mask);
-
             // Apply morphological operations to clean up the mask
             erode(fg_mask, fg_mask, Mat(), Point(-1, -1), 2);
             dilate(fg_mask, fg_mask, Mat(), Point(-1, -1), 2);
@@ -502,7 +494,7 @@ int main() {
 
             motion_detected = false;
             // Check for motion after a warm up time to avoid initial writing of a file
-            if (frameCounter > warmup_time * fps) {
+            if (frameCounter >= warmup_time * fps) {
               vector<Rect>boundRect (contours.size());
               vector<vector<Point> > contours_poly( contours.size() );
               for (int i = 0; i < contours.size();i++) {
@@ -534,14 +526,16 @@ int main() {
                 else {
                   break;
                 }
-              }
-            }
-
-          }    // END    if (camera_event_detection_by_python != "Yes") 
+              } // END of for (int i = 0; i < contours.size();i++)
+            } // END of if (frameCounter >= warmup_time * fps)
+          }    // END of if (camera_event_detection_by_python != "Yes") 
           
           if (camera_event_detection_by_python == "Yes") {
-            // Fork a new process for getTapoMessages
-
+                // Read result from shared memory for getTapoMessages
+                sem_wait(&sharedMemory1->mutex);
+                std::string messages_data(sharedMemory1->message);
+                sem_post(&sharedMemory1->mutex);
+                      
                 if (show_motion_fps_date_msg_on_display_console == "Yes") {
                   // put frame number and time on screen
                   // [xK Erases part of the line. If n is 0 (or missing), 
@@ -550,7 +544,7 @@ int main() {
                   // If n is 2, clear entire line. Cursor position does not change. 
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));
-                  cout << '@'+str_frameCounter + " " + time_now_buf + "\033[K\r"; 
+                  cout << "@" << str_frameCounter << " " << time_now_buf  << ". Camera:" << messages_data << "\r"; 
                 }
                 if (show_motion_fps_date_msg_on_display_window == "Yes") {
                   // put frame number and time on screen
@@ -562,33 +556,22 @@ int main() {
                 motion_detected = false;
                 
                 // Check for motion after a warm up time to avoid initial writing of a file
-                if (frameCounter > warmup_time * fps) {
-                   int modulo_result_tapo = frameCounter % fps;
-                   if (modulo_result_tapo == 0) {  
-                      // Child process (getTapoMessages)
-                      getTapoMessages(sharedMemory1);
-                      //return 0;
-                      // std::cout << "frameCounter:" << frameCounter << endl;
-
-                      // Wait for getTapoMessages to finish
-                      //waitpid(pid1, NULL, 0);
-
-                      // Read result from shared memory for getTapoMessages
-                      sem_wait(&sharedMemory1->mutex);
-                      std::string messages_data(sharedMemory1->message);
-                      sem_post(&sharedMemory1->mutex);
+                if (frameCounter >= warmup_time * fps) {
+                  int modulo_result_tapo = frameCounter % 2;
+                  if (modulo_result_tapo == 0) {  
                       
                       // Print the result for getTapoMessages
-                      //std::cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << std::endl;
+                      // std::cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << std::endl;
 
                       if (messages_data.rfind("Motion detected @", 0) == 0) { // pos=0 limits the search to the prefix
                         motion_detected = true;
                       }
-                    }
+                    } // END of if (modulo_result_tapo == 0) 
                     // Print the result
-                    // std::cout << "Result from asynchronous task: " << result << std::endl;
-                }  
+                    // std::cout << "Result from asynchronous task: " << messages_data << std::endl;
+                }  // END of if (frameCounter >= warmup_time * fps) 
 
+            // When motion has been detected and displays are required
             if (motion_detected) {
               if (show_motion_detected_msg_on_display_window == "Yes") {          
                 //    cout << "Motion detected" << endl;
@@ -600,124 +583,16 @@ int main() {
                 // put frame number and time on screen
                 cout << "motion detected                        \033[K\r";
               } 
-            }
-          }  
-                      
+            } // END of if (motion_detected) {
+          }  // END of if (camera_event_detection_by_python == "Yes") 
+ 
+          // This simulation is meant for test purposes e.g. to verify the AI Object detection and saving of pictures                 
           if (simulate_a_motion == "Yes") {
               if (frameCounter > 100 and frameCounter < 300 or frameCounter > 400 and frameCounter < 600) {motion_detected = true;} else {motion_detected = false;}
           }
 
-          if (recording_on == true and AIobject_detection_service == "Yes") {
-              int modulo_result_AI = frameCounter % fps*3;
-              if (modulo_result_AI == 0) {  
 
-                // Define vector for the extraction of  object detection results
-                vector<DetectionResult> detectionResults;   
-                    // Child process (postImageAndGetResponse)
-                    // Post the image to the AI Object Detection Service and get the detectionResults from the response
-                    postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  frame,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
-                    //return 0;
-
-                    // Parent process (main)
-                    // Do other work while getTapoMessages and postImageAndGetResponse are running...
-
-                    // Wait for postImageAndGetResponse to finish
-                    //waitpid(pid2, NULL, 0);
-
-                    // Read result from shared memory for postImageAndGetResponse
-                    sem_wait(&sharedMemory2->mutex);
-                    std::string response_data(sharedMemory2->message);
-                    sem_post(&sharedMemory2->mutex);
-                    
-                    if (strlen(sharedMemory2->message) > 0) {
-                        // Print the result for postImageAndGetResponse
-                        // std::cout << "Result from postImageAndGetResponse asynchronous task: " << response_data << std::endl;
-                        
-                        // Parsing JSON response
-                        Json::Value jsonData;
-                        Json::Value root {};
-                        Json::Reader jsonReader;
-                        if (jsonReader.parse(response_data, jsonData)) {
-                          if (show_AIResponse_message == "Yes") {
-                              time(&now);
-                              strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));              
-                              cout << time_now_buf << " Successfully parsed JSON data" << endl;
-                              cout << time_now_buf << " JSON data received:" << endl;
-                              cout << time_now_buf << jsonData.toStyledString() << endl;
-                            //  const string aiPredictions(jsonData["predictions"].asString());
-                          }  // END  if (show_AIResponse_message == "Yes")
-                          if (show_AIObjDetectionResult == "Yes") {
-                              const string aiMessage(jsonData["message"].asString());                  
-                              const string aiSuccess(jsonData["success"].asString());                   
-                              // Extract object detection results
-                              for (const auto& prediction : jsonData["predictions"]) {
-                                  DetectionResult result;
-                                  result.label = prediction["label"].asString();
-                                  result.confidence = prediction["confidence"].asString();
-                                  float conf;
-                                  conf = prediction["confidence"].asFloat() * 100.0;
-                                  time(&now);
-                                  strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));                      
-                                  cout << time_now_buf << " AI Object Detection service message: Success is " << aiSuccess << ". Found: " << result.label << ". Confidence: " << setprecision(3) << conf << "%" << endl; 
-                                  // Drawing a rectangle in OpenCV with C++ behaves differently than in Python
-                                  // In C++ you need Rect((x,y), (x+width_offset, y+height_offset)
-                                  result.boundingBox = Rect(prediction["x_min"].asInt(), prediction["y_min"].asInt(),
-                                                       prediction["x_max"].asInt() - prediction["x_min"].asInt() , prediction["y_max"].asInt() - prediction["y_min"].asInt());
-                                  detectionResults.push_back(result);
-                                  }
-
-                          } // END  if (show_AIObjDetectionResult == "Yes")
-                        } // END of if (jsonReader.parse(response_data, jsonData))
-                        else 
-                        {
-                            time(&now);
-                            strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));
-                            cout  << time_now_buf << " Could not parse HTTP data as JSON" << endl;
-                            cout  << time_now_buf << " HTTP data was:\n" << response_data << endl;
-                        } // END of else (jsonReader.parse(response_data, jsonData))
-                    } // END of if (strlen(sharedMemory2->message) > 0)
-
-                    // Clean up
-                    sem_destroy(&sharedMemory1->mutex);
-                    sem_destroy(&sharedMemory2->mutex);
-                    shm_unlink("/my_shared_memory1");
-                    shm_unlink("/my_shared_memory2");
-          
-                         
-                  for (const auto& result : detectionResults) {
-                      // Verify if result.label is equal to one of the values defined in objects_for_detection
-                      // if found then we will draw rectangles and label. In Python it would be: if "car" in ['car', person', 'bicycle']
-                      bool found = false;
-                      for (const string& value : objects_for_detection) {
-                        if (result.label == value) { 
-                          found = true;
-                          break;
-                        }
-                      } // END for (const string& value : objects_for_detection)  
-                      if (found) {
-                        // Draw rectangles and labels for each detected object if required
-                        if (draw_object_rectangles == "Yes") {
-                          // Draw a rectangle around the detected object
-                          rectangle(frame_original, result.boundingBox, Scalar(0, 255, 0), 2);
-                          // Put the label at the top left corner of the rectangle
-                          if(result.boundingBox.y - 10 < 10) {
-                            putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y + 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2); 
-                            }
-                            else {
-                          putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y - 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2);
-                          }
-                        }
-                        time(&now);
-                        strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));
-                        imwrite(output_obj_picture_path + prefix_output_picture + time_now_buf + "_" + result.label + ".jpg", frame_original);  
-                        cout << "Save in: " << output_obj_picture_path + prefix_output_picture + time_now_buf + "_" + result.label + ".jpg" << endl;
-                        } // END if (found) 
-                  }  // END for (const auto& result : detectionResults)                  
-
-              } // END of if (modulo_result_AI!= 0) { 
-          } // END  if (recording_on == false and AIobject_detection_service == "Yes") 
-
-          // If recording is on, then check if extra record time must be added and check if record duration is passed 
+          // If recording is on, then check if extra record time must be added and check if record duration hjas been passed 
           if (recording_on) {
               if (motion_detected and time(0) >= end_time - before_record_duration_is_passed) {
                 end_time += extra_record_time;
@@ -725,7 +600,7 @@ int main() {
               if (time(0) - start_time > 60 * maximum_recording_time) {
                 end_time = time(0);
               }
-          }            
+          }  // END of First! if (recording_on)           
                           
           // If motion detected, start recording and set the record duration
           if (motion_detected and not recording_on) {
@@ -736,10 +611,9 @@ int main() {
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));              
                   cout << "Recording started @ " + string(time_now_buf) << endl;
                   // set the codec and create VideoWriter object
-                  outputVideo.open(output_video_path + prefix_output_video + time_now_buf + extension_of_video,  VideoWriter::fourcc(codecString[0], codecString[1], codecString[2], codecString[3]), fps, frameSize, true);
-                  cout << "Save in: " << output_video_path + prefix_output_video + time_now_buf + extension_of_video << endl;
-          }
-
+                  outputVideo.open(output_video_path + prefix_output_video + time_now_buf + extension_of_video,  VideoWriter::fourcc(codecString[0], codecString[1], codecString[2], codecString[3]), fps, frameSize, true);                
+                  cout << "To be saved in: " << output_video_path + prefix_output_video + time_now_buf + extension_of_video << endl;
+          } // END of if (motion_detected and not recording_on) 
 
           // If recording is on, check if standard record duration plus applicable extra record time has been passed. 
           if (recording_on) {
@@ -747,7 +621,7 @@ int main() {
               if (time(0) >= end_time) {
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));          
-                  cout << "Recording stopped @ " + string(time_now_buf) << endl;
+                  cout << "\033[2KRecording stopped @ " + string(time_now_buf) << "\r";
                   start_time = time(0);
                   end_time = time(0);
                   recording_on = false;
@@ -757,7 +631,7 @@ int main() {
                       return -1;
                   }    
                   outputVideo.release();
-              }
+              } // END of if (time(0) >= end_time)
               else {          
                   // Write frame to the output video  
                   if (!outputVideo.isOpened()) {
@@ -767,15 +641,129 @@ int main() {
                   if (show_timing_for_recording == "Yes") {
                   cout << " motion_detected: " << motion_detected << " time(0): " << time(0) << " end_time: " << end_time << " start_time: " << start_time << " record_duration: " << record_duration << " extra_record_time: " << extra_record_time << " Calc. record duration: " << time(0) -  start_time << endl;
                   }
-                            
+                  
+                  // Write buffered frames to file
+                  if (!frameBuffer.empty()) {
+                      while (!frameBuffer.empty()) {
+                          teller += 1;
+                          outputVideo.write(frameBuffer.front());
+                          frameBuffer.pop();
+                      } 
+                      // cout << frameCounter << " <= Total frame counter | # written frames from buffer => " << teller << endl;
+                  }
+                  else {          
                   outputVideo.write(frame_original);
-              }
-          }
+                  }
+              } // END of else branch of if (time(0) >= end_time)
+          } // END of Second! if (recording_on)
+          
+          if (recording_on == true and AIobject_detection_service == "Yes") {
+            int modulo_result_AI = frameCounter % fps*3;
+            if (modulo_result_AI == 0) {  
+              // Define vector for the extraction of  object detection results
+              vector<DetectionResult> detectionResults;   
+              // Child process (postImageAndGetResponse)
+              // Post the image to the AI Object Detection Service and get the detectionResults from the response
+              postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  frame,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
+
+              // Read result from shared memory for postImageAndGetResponse
+              sem_wait(&sharedMemory2->mutex);
+              std::string response_data(sharedMemory2->message);
+              sem_post(&sharedMemory2->mutex);
+              
+              // check if there is some content in the shared buffer
+              if (strlen(sharedMemory2->message) > 0) {
+                // Print the result for postImageAndGetResponse
+                // std::cout << "Result from postImageAndGetResponse asynchronous task: " << response_data << std::endl;
+                
+                // Parsing JSON response
+                Json::Value jsonData;
+                Json::Value root {};
+                Json::Reader jsonReader;
+                if (jsonReader.parse(response_data, jsonData)) {
+                  if (show_AIResponse_message == "Yes") {
+                    time(&now);
+                    strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));              
+                    cout << time_now_buf << " Successfully parsed JSON data" << endl;
+                    cout << time_now_buf << " JSON data received:" << endl;
+                    cout << time_now_buf << jsonData.toStyledString() << endl;
+                    //  const string aiPredictions(jsonData["predictions"].asString());
+                  }  // END  if (show_AIResponse_message == "Yes")
+                  if (show_AIObjDetectionResult == "Yes") {
+                    const string aiMessage(jsonData["message"].asString());                  
+                    const string aiSuccess(jsonData["success"].asString());                   
+                    // Extract object detection results
+                    for (const auto& prediction : jsonData["predictions"]) {
+                      DetectionResult result;
+                      result.label = prediction["label"].asString();
+                      result.confidence = prediction["confidence"].asString();
+                      // prepare confidence fraction (e.g.0.8334) for a percentage (e.g. 83.34%) in cout
+                      float conf;
+                      conf = prediction["confidence"].asFloat() * 100.0;
+                      time(&now);
+                      strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));                      
+                      cout << time_now_buf << " AI Object Detection service message: Success is " << aiSuccess << ". Found: " << result.label << ". Confidence: " << setprecision(3) << conf << "%" << endl; 
+                      // Drawing a rectangle in OpenCV with C++ behaves differently than in Python
+                      // In C++ you need Rect((x,y), (x+width_offset, y+height_offset)
+                      result.boundingBox = Rect(prediction["x_min"].asInt(), prediction["y_min"].asInt(),
+                                           prediction["x_max"].asInt() - prediction["x_min"].asInt() , prediction["y_max"].asInt() - prediction["y_min"].asInt());
+                      detectionResults.push_back(result);
+                    } // END of for (const auto& prediction : jsonData["predictions"])
+                  } // END of if (show_AIObjDetectionResult == "Yes")
+                } // END of if (jsonReader.parse(response_data, jsonData))
+                else 
+                {
+                  time(&now);
+                  strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));
+                  cout  << time_now_buf << " Could not parse HTTP data as JSON" << endl;
+                  cout  << time_now_buf << " HTTP data was:\n" << response_data << endl;
+                } // END of else branch of if (jsonReader.parse(response_data, jsonData))
+              } // END of if (strlen(sharedMemory2->message) > 0)
+
+              // Clean up
+              sem_destroy(&sharedMemory1->mutex);
+              sem_destroy(&sharedMemory2->mutex);
+              shm_unlink("/my_shared_memory1");
+              shm_unlink("/my_shared_memory2");
+      
+              // evaluate the detection results of the AI Object Detection service
+              for (const auto& result : detectionResults) {
+                // Verify if result.label is equal to one of the values defined in objects_for_detection
+                // if found then we will draw rectangles and label. In Python it would be: if "car" in ['car', person', 'bicycle']
+                bool found = false;
+                for (const string& value : objects_for_detection) {
+                  if (result.label == value) { 
+                    found = true;
+                    break;
+                  }
+                } // END for (const string& value : objects_for_detection)  
+                if (found) {
+                  // Draw rectangles and labels for each detected object if required
+                  if (draw_object_rectangles == "Yes") {
+                    // Draw a rectangle around the detected object
+                    rectangle(frame_original, result.boundingBox, Scalar(0, 255, 0), 2);
+                    // Put the label at the top left corner of the rectangle
+                    if(result.boundingBox.y - 10 < 10) {
+                      putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y + 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2); 
+                      }
+                      else {
+                    putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y - 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2);
+                    }
+                  }
+                  time(&now);
+                  strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", gmtime(&now));
+                  imwrite(output_obj_picture_path + prefix_output_picture + time_now_buf + "_" + result.label + ".jpg", frame_original);  
+                  cout << "Saved: " << output_obj_picture_path + prefix_output_picture + time_now_buf + "_" + result.label + ".jpg" << endl;
+                  } // END if (found) 
+              }  // END for (const auto& result : detectionResults)                  
+            } // END of if (modulo_result_AI!= 0) { 
+          } // END  if (recording_on == false and AIobject_detection_service == "Yes") 
+          
           if (show_display_window_not_resized == "Yes") {
               // Display the resulting frame
               imshow("Motion Detection Original Format", frame_original);
           }
-                    
+         
           if (show_display_window == "Yes") {
               Mat frame_original_resized;
               resize(frame_original, frame_original_resized, Size(640,370));     
@@ -789,15 +777,13 @@ int main() {
               // Display the resulting frame
               imshow("Motion Detection with Mask", frame_resized);
           }
-
           // Check for key press to exit
           if (waitKey(1) == 'q') {
-                Py_FinalizeEx();
                 break;
           }
-        }
+        } // END of  while (true) 
 
-
+        Py_FinalizeEx();
         // Release the camera
         cap.release();
         destroyAllWindows();
@@ -809,8 +795,7 @@ int main() {
         std::cerr << "Fork for getTapoMessages failed!" << std::endl;
         return 1;
     }
-    
-
+    Py_FinalizeEx();
 
     return 0;
 }
