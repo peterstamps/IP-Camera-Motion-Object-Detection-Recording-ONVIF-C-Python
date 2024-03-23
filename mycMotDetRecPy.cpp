@@ -557,16 +557,12 @@ int main() {
                 
                 // Check for motion after a warm up time to avoid initial writing of a file
                 if (frameCounter >= warmup_time * fps) {
-                  int modulo_result_tapo = frameCounter % 2;
-                  if (modulo_result_tapo == 0) {  
-                      
                       // Print the result for getTapoMessages
                       // std::cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << std::endl;
 
                       if (messages_data.rfind("Motion detected @", 0) == 0) { // pos=0 limits the search to the prefix
                         motion_detected = true;
                       }
-                    } // END of if (modulo_result_tapo == 0) 
                     // Print the result
                     // std::cout << "Result from asynchronous task: " << messages_data << std::endl;
                 }  // END of if (frameCounter >= warmup_time * fps) 
