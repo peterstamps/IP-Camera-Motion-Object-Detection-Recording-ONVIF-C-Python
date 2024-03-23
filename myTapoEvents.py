@@ -88,16 +88,16 @@ async def eventMsg(myinput=None):
     await mycam.close()  
     return ret_message
   except:
-     return "No message from camera. Maybe an error occured." 
+     return "No message from camera. Maybe an error occurred 1." 
 
 def getTapoEventMessage(myinput=None):
   try:
     loop = asyncio.get_event_loop()
     msg = loop.run_until_complete(eventMsg(myinput))
-    # print(msg)
+    #print(msg)
     return str(msg) 
   except:
-     return "No message from camera. Maybe an error occured." 
+    return "No message from camera. Maybe an error occurred 2." 
     
 
 if __name__ == '__main__':

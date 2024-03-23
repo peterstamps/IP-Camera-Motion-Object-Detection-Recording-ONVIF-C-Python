@@ -594,8 +594,13 @@ int main() {
 
           // If recording is on, then check if extra record time must be added and check if record duration hjas been passed 
           if (recording_on) {
-              if (motion_detected and time(0) >= end_time - before_record_duration_is_passed) {
-                end_time += extra_record_time;
+              if (motion_detected) {
+                if (time(0) >= end_time - before_record_duration_is_passed) {
+                  end_time += extra_record_time;
+                }
+                else {
+                  end_time += 1; // we add 1 extra second as long as motion is detected until extra record_time will be added above
+                }
               }
               if (time(0) - start_time > 60 * maximum_recording_time) {
                 end_time = time(0);
@@ -639,7 +644,7 @@ int main() {
                       return -1;
                   }  
                   if (show_timing_for_recording == "Yes") {
-                  cout << " motion_detected: " << motion_detected << " time(0): " << time(0) << " end_time: " << end_time << " start_time: " << start_time << " record_duration: " << record_duration << " extra_record_time: " << extra_record_time << " Calc. record duration: " << time(0) -  start_time << endl;
+                  cout << " motion @ " << motion_detected << " time(0): " << time(0) << " end: " << end_time << " start: " << start_time << " duration: " << record_duration << " extra: " << extra_record_time << " Seconds passed: " << time(0) -  start_time << endl;
                   }
                   
                   // Write buffered frames to file
@@ -658,7 +663,8 @@ int main() {
           } // END of Second! if (recording_on)
           
           if (recording_on == true and AIobject_detection_service == "Yes") {
-            int modulo_result_AI = frameCounter % fps*3;
+            // Initialize variables for a new object detection, object_detection_time is defined in config
+            int modulo_result_AI = frameCounter % obj_detection_each_x_frames;
             if (modulo_result_AI == 0) {  
               // Define vector for the extraction of  object detection results
               vector<DetectionResult> detectionResults;   
@@ -756,7 +762,7 @@ int main() {
                   cout << "Saved: " << output_obj_picture_path + prefix_output_picture + time_now_buf + "_" + result.label + ".jpg" << endl;
                   } // END if (found) 
               }  // END for (const auto& result : detectionResults)                  
-            } // END of if (modulo_result_AI!= 0) { 
+            } // END of if (modulo_result_AI == 0)  
           } // END  if (recording_on == false and AIobject_detection_service == "Yes") 
           
           if (show_display_window_not_resized == "Yes") {
