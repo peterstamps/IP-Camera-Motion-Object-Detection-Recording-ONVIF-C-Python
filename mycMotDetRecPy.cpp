@@ -321,15 +321,15 @@ int main() {
         int fps = reader.GetInteger("video_recording", "fps", 15);
         // The codec to be used for writing the videos
         string codecString = reader.Get("video_recording", "codec", "XVID");
-        int maximum_recording_time = reader.GetFloat("video_recording", "maximum_recording_time", 2);
+        float maximum_recording_time = reader.GetFloat("video_recording", "maximum_recording_time", 2.5);
         // Record duration in seconds
         int record_duration = reader.GetInteger("video_recording", "record_duration", 10);
         // Buffer x seconds the frames before a (new) motion is detected
         int buffer_before_motion = reader.GetInteger("video_recording", "buffer_before_motion", 5);
         // Extra time to add to the record duration if new motion is detected
         int extra_record_time = reader.GetInteger("video_recording", "extra_record_time", 5);
-        // Pre-motion recording duration in second. The time before recording should stop will be used to detect uf new motion happened.
-        int before_record_duration_is_passed = reader.GetInteger("video_recording", "before_record_duration_is_passed", 5);
+        // Pre-motion recording duration in second. The time before recording should stop wiil be used to detect uf new motion happened.
+        int before_record_duration_is_passed = reader.GetInteger("video_recording", "before_record_duration_is_passed", 3);
         // Output video parameters
         string show_timing_for_recording = reader.Get("video_recording", "show_timing_for_recording", "No");
         
@@ -415,13 +415,15 @@ int main() {
         }
 
         // Initialize variables for recording
-        chrono::steady_clock::time_point start_time, end_time;
+        chrono::steady_clock::time_point  start_time;
+        chrono::steady_clock::time_point  end_time;
         int frameCounter = 0;
         int teller = 0;
         int obj_detection_each_x_frames = fps * object_detection_time;
         
          
         bool recording_on = false;
+        int new_record_duration = record_duration;
         
         int bufferSeconds = buffer_before_motion;
         // Set buffer size in frames
@@ -591,15 +593,37 @@ int main() {
           // If recording is on, then check if extra record time must be added and check if record duration hjas been passed 
           if (recording_on) {
               if (motion_detected) {
-                int modulo_result_motion = frameCounter % fps;
-                if (modulo_result_motion == 0) { 
-                  if (chrono::steady_clock::now() >= end_time - chrono::seconds(before_record_duration_is_passed) ) {
-                    end_time += chrono::seconds(extra_record_time);
-                  }
-                } // END of if (modulo_result_motion == 0) 
+                // Get the current time_point
+                auto currentTime = std::chrono::steady_clock::now();
+                // Convert the time_point to a time since epoch
+                auto timeSinceEpoch = currentTime.time_since_epoch();
+                // Convert the time since epoch to seconds and store it as an int
+                int currentTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(timeSinceEpoch).count();
+                // Convert the time_point end_time to a time since epoch
+                auto endTimeSinceEpoch = end_time.time_since_epoch();
+                // Convert the time since epoch to seconds and store it as an int
+                int endTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(endTimeSinceEpoch).count();                  
+                // comparison in integers
+                if (currentTime_seconds_int >= endTime_seconds_int - before_record_duration_is_passed ) {
+                  end_time += chrono::seconds(extra_record_time);
+                }
+               // else {
+               //   end_time += chrono::seconds(1); // we add 1 extra second as long as motion is detected until extra record_time will be added above
+               // }
               } // END of  if (motion_detected)
+              // Get the current time_point, need to convert that to integer
+              auto currentTime = std::chrono::steady_clock::now();
+              // Convert the time_point to a time since epoch
+              auto timeSinceEpoch = currentTime.time_since_epoch();
+              // Convert the time since epoch to seconds and store it as an int
+              int currentTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(timeSinceEpoch).count();
 
-              if (chrono::steady_clock::now() - start_time > chrono::seconds(60 * maximum_recording_time)) {
+              // Convert the time_point start_time to a time since epoch, need to convert that to integer
+              auto startTimeSinceEpoch = start_time.time_since_epoch();
+              // Convert the time since epoch to seconds and store it as an int
+              int startTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(startTimeSinceEpoch).count();                  
+              // comparison in integers
+              if (currentTime_seconds_int - startTime_seconds_int > 60 * maximum_recording_time ) {
                 end_time = chrono::steady_clock::now();
               }  // END of else branch if (motion_detected)
           }  // END of First! if (recording_on)           
@@ -608,7 +632,7 @@ int main() {
           if (motion_detected and not recording_on) {
                   recording_on = true;
                   start_time = chrono::steady_clock::now();
-                  end_time = start_time + chrono::seconds(record_duration);
+                  end_time = start_time + chrono::seconds(new_record_duration);
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));              
                   cout << "Recording started @ " + string(time_now_buf) << endl;
@@ -625,15 +649,16 @@ int main() {
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));          
                   cout << "Recording stopped @ " + string(time_now_buf) << "\033[K\n";
                   start_time = chrono::steady_clock::now();
-                  end_time =chrono::steady_clock::now();
+                  end_time = chrono::steady_clock::now();
                   recording_on = false;
+                  new_record_duration = record_duration; // reset to start value
                   // Release the VideoWriter object
                   if (!outputVideo.isOpened()) {
                       cerr << "Could not open the output video file for release\n";
                       return -1;
                   }    
                   outputVideo.release();
-              } // END of if (time(0) >= end_time)
+              } // END of if chrono::steady_clock::now() >= end_time)
               else {          
                   // Write frame to the output video  
                   if (!outputVideo.isOpened()) {
@@ -641,21 +666,23 @@ int main() {
                       return -1;
                   }  
                   if (show_timing_for_recording == "Yes") {
-                  // Get the current time_point
+                  // Get the current time_point, need to convert that to integer
                   auto currentTime = std::chrono::steady_clock::now();
                   // Convert the time_point to a time since epoch
                   auto timeSinceEpoch = currentTime.time_since_epoch();
-                  // Convert the time since epoch to seconds
-                  auto current_timeseconds = std::chrono::duration_cast<std::chrono::seconds>(timeSinceEpoch).count();
-                  // Convert the time_point to a time since epoch
-                  auto start_timeSinceEpoch = start_time.time_since_epoch();
-                  // Convert the time since epoch to seconds
-                  auto start_timeseconds = std::chrono::duration_cast<std::chrono::seconds>(start_timeSinceEpoch).count();                  
-                  // Convert the time_point to a time since epoch
-                  auto end_timeSinceEpoch = end_time.time_since_epoch();
-                  // Convert the time since epoch to seconds
-                  auto end_timeseconds = std::chrono::duration_cast<std::chrono::seconds>(end_timeSinceEpoch).count();                  
-                  cout << " motion@ " << motion_detected << " current: " << current_timeseconds << " end: " << end_timeseconds << " start: " << start_timeseconds << " record: " << end_timeseconds - start_timeseconds << " duration,extra: " << record_duration << "," << extra_record_time << " To go: " << end_timeseconds - current_timeseconds  << endl;
+                  // Convert the time since epoch to seconds and store it as an int
+                  int currentTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(timeSinceEpoch).count();
+                  
+                  // Convert the time_point end_time to a time since epoch, need to convert that to integer
+                  auto endTimeSinceEpoch = end_time.time_since_epoch();
+                  // Convert the time since epoch to seconds and store it as an int
+                  int endTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(endTimeSinceEpoch).count();                  
+                  
+                  // Convert the time_point start_time to a time since epoch, need to convert that to integer
+                  auto startTimeSinceEpoch = start_time.time_since_epoch();
+                  // Convert the time since epoch to seconds and store it as an int
+                  int startTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(startTimeSinceEpoch).count();                  
+                  cout << " motion@ " << motion_detected << " current " << currentTime_seconds_int << " end: " << endTime_seconds_int << " start: " << startTime_seconds_int << " record: " << endTime_seconds_int - startTime_seconds_int << " new duration: " << new_record_duration << " extra: " << extra_record_time << " To go: " << currentTime_seconds_int - startTime_seconds_int << endl;
                   }
                   
                   // Write buffered frames to file
@@ -670,7 +697,7 @@ int main() {
                   else {          
                   outputVideo.write(frame_original);
                   }
-              } // END of else branch of if (chrono::steady_clock::now() >= end_time)
+              } // END of else branch of if (time(0) >= end_time)
           } // END of Second! if (recording_on)
           
           if (recording_on == true and AIobject_detection_service == "Yes") {
