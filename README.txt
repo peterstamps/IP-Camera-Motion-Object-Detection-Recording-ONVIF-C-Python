@@ -37,6 +37,20 @@ Capabilities
 - This was created on Raspberry PI 4 (64 bit Bookworm) running with 4GB RAM. 1080x720 streams work really good. I tried also with 2560*1440. 
   The results are pretty good when you use the Python Method 2 option (see above), which is checking the IP camera for motion events. This is valid for the PI 4 processor (not overclocked!)
 Method 1 consumes too much power and the results for stream 1 (2560x1440) pixels will be not perfect too some times poor...
+
+Some usage guidelines:
+- First note that the configuration settings in mycMotDetRecPy_config.ini MUST be adapted to your situation else it won't work!
+- To get the correct Recording settings for your camera and connection speed to the computer where you run this program you need to experiment with the following values:
+    buffer_before_motion = 3                   ; Int default 5 s
+    record_duration = 10                       ; Int default 10 s
+    extra_record_time = 5                      ; Int default 5 s
+    before_record_duration_is_passed = 5       ; Int default 5 s.  
+- Start with lower values and increase them step by step. Often the first seconds the camera signals new motions, so it may be wise to set before_record_duration_is_passed somewhat higher at the start.
+  e.g record_duration = 10 and before_record_duration_is_passed = 9. Step by step you reduce the before_record_duration_is_passed to avoid to much extra recording time at the end!
+- You can alos reduce the extra_record_time.  The behaviour on the Raspberry PI 4 or an Ubuntu Server can lead to diffference due to processor speed and perhaps network connectivity
+- Play with it till you get results you like. Usually a few rounds will be enough 
+- Set parameter show_timing_for_recording = Yes  during this testing
+
 Compilation guideline 
 .....................
 (copied from top of the source code file mycMotDetRecPy.cpp)
