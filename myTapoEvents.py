@@ -42,15 +42,15 @@ async def eventMsg(myinput=None):
         )
     # Update xaddrs for services 
     await mycam.update_xaddrs() 
-    device_mgmt = await mycam.create_devicemgmt_service()
-    device_info = await device_mgmt.GetDeviceInformation()
+    #device_mgmt = await mycam.create_devicemgmt_service()
+    #device_info = await device_mgmt.GetDeviceInformation()
     #print(device_info)
-    params = {'IncludeCapability': True }
-    services = await device_mgmt.GetServices(params)
+    #params = {'IncludeCapability': True }
+    #services = await device_mgmt.GetServices(params)
     #print(device_info)
-    await mycam.update_xaddrs() 
+    #await mycam.update_xaddrs() 
     # Create a pullpoint manager. 
-    interval_time = (dt.timedelta(seconds=5))
+    interval_time = (dt.timedelta(seconds=15))
     pullpoint_mngr = await mycam.create_pullpoint_manager(interval_time, subscription_lost_callback = Callable[[], None],)
     # create the pullpoint  
     pullpoint = await mycam.create_pullpoint_service()
@@ -64,7 +64,13 @@ async def eventMsg(myinput=None):
     pullpoint_req.MessageLimit=10
     pullpoint_req.Timeout = (dt.timedelta(days=0,hours=0,seconds=1))
     cameraMessages = await pullpoint.PullMessages(pullpoint_req)
+
     if cameraMessages:
+      # renew the subscription makes sense when looping over 
+     # termination_time = (
+     #  (dt.datetime.utcnow() + dt.timedelta(days=1,hours=1,seconds=1))
+     #     .isoformat(timespec="seconds").replace("+00:00", "Z")
+     # )
       # Auto-detect zones:
       from_zone = tz.tzutc()
       to_zone = tz.tzlocal()
