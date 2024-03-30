@@ -225,7 +225,7 @@ void postImageAndGetResponse(SharedMemory* sharedMemory, string& AIserverUrl, st
         strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
             
         if (res != CURLE_OK) {
-            cerr << "curl_easy_perform() failed: " << curl_easy_strerror(res) << endl;
+            cerr << "Access to AI Object Detection service failed: " << curl_easy_strerror(res) << "\nCheck URL; Is server running?" << endl;
             }    
 
       } // END if (curl)
@@ -371,7 +371,9 @@ int main() {
         // Fork a new process for CURL asyncTask called postImageAndGetResponse
         pid_t pid2 = fork();
         if (pid2 == 0) {
+          if (AIobject_detection_service == "Yes") {
           postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  mask,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
+        }
           return 0; // required!
         } else if (pid2 > 0) {
           // Parent process (main)

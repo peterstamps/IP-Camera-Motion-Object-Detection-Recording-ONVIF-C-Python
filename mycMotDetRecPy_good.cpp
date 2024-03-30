@@ -132,8 +132,7 @@ void getTapoMessages(SharedMemory* sharedMemory) {
                       sem_wait(&sharedMemory->mutex);
                       //snprintf(sharedMemory->message, BUFFER_SIZE, "AsyncTask1: IntValue = %d, StringValue = %s", intValue, stringValue.c_str());
                       snprintf(sharedMemory->message, BUFFER_SIZE, "%s", savedString);
-                      sem_post(&sharedMemory->mutex); 
-                      //sleep(1);   // slow down the speed 0.3 seconds, too fast leads to too much errors                   
+                      sem_post(&sharedMemory->mutex);                      
                   }
                   Py_DECREF(pValue);
               }
@@ -242,19 +241,7 @@ void postImageAndGetResponse(SharedMemory* sharedMemory, string& AIserverUrl, st
       sem_post(&sharedMemory->mutex);
 }
 
-// Function to parse date string
-std::chrono::system_clock::time_point parseDate(const std::string& dateStr) {
-    std::tm tm = {};
-    std::istringstream ss(dateStr.substr(22)); // Extract date part from text+date string
-    // std::cout << dateStr.substr(22) << "\n\n";
-    char delim;
-    ss >> tm.tm_year >> delim >> tm.tm_mon >> delim >> tm.tm_mday >> delim
-       >> tm.tm_hour >> delim >> tm.tm_min >> delim >> tm.tm_sec;
-    tm.tm_year -= 1900; // Years since 1900
-    tm.tm_mon -= 1;     // Month index starts from 0
-    std::time_t t = std::mktime(&tm);
-    return std::chrono::system_clock::from_time_t(t);
-}
+
 
 int main() {
     // Register signal and signal handler. Used to check if CTRL-c has been pressed in console!
@@ -282,7 +269,7 @@ int main() {
         // Do other work while getTapoMessages is running...
    
         
-        INIReader reader("mycMotDetRecPyB_config.ini");
+        INIReader reader("mycMotDetRecPy_config.ini");
         if (reader.ParseError() < 0) {
             cout << "Error: Cannot load config.ini" << endl;
             return 1;
@@ -291,19 +278,29 @@ int main() {
         // Read variables from the .ini file
         // Full rtsp URL of IP camera inluding user name and password when required
         string url = reader.Get("camera", "url", "");
+        // When set to Yes a Python interpreter is used plus additional python modules to use ONVIF calls to the camera to detect events (motion)
+        string camera_event_detection_by_python = reader.Get("camera", "camera_event_detection_by_python", "No");
         
         // MOTION DETECTION
+        // Thresholds for motion detection contour area: this is the minimum numer of the changed pixels between frames
+        int min_contour_area = reader.GetInteger("motion_detection", "min_contour_area", 400);
+        // Background subtraction method (choose between "KNN" or "MOG2")
+        string background_subtractor_method = reader.Get("motion_detection", "background_subtraction_method", "KNN");
         // Path to the mask file
         string mask_path = reader.Get("motion_detection", "mask_path", "");
         // Warm up time. The time to be passed after start of program. Hereafter motion dectection will start.
         int warmup_time = reader.GetInteger("motion_detection", "warmup_time", 3);
+        // When No motion rectangles will be drawn on the screen around the moving objects
+        string draw_motion_rectangles = reader.Get("motion_detection", "draw_motion_rectangles", "No");
         // Simulate a motion Default No. (used for test purposes)
         string simulate_a_motion = reader.Get("motion_detection", "simulate_a_motion", "No");
         // Show the display window in a resized frame (but not with a mask)
         string show_display_window = reader.Get("motion_detection", "show_display_window", "No");
         // Show the display window in its original frame (not resized)
         string show_display_window_not_resized = reader.Get("motion_detection", "show_display_window_not_resized", "No");
-        // Show indicator that motion has been detected on display window       
+        // Show the display window with mask in a resized frame
+        string show_display_window_with_mask = reader.Get("motion_detection", "show_display_window_with_mask", "No");
+        // Show indicator that motion has been detected on display window
         string show_motion_detected_msg_on_display_window = reader.Get("motion_detection", "show_motion_detected_msg_on_display_window", "No");
         // Show the fps and the date and time on the display window
         string show_motion_fps_date_msg_on_display_window = reader.Get("motion_detection", "show_motion_fps_date_msg_on_display_window", "No");
@@ -311,6 +308,8 @@ int main() {
         string show_motion_detected_msg_on_display_console = reader.Get("motion_detection", "show_motion_detected_msg_on_display_console", "No");
         // Show the fps and the date and time on the display  console (terminal window)
         string show_motion_fps_date_msg_on_display_console = reader.Get("motion_detection", "show_motion_fps_date_msg_on_display_console", "No");
+        // Output video parameters
+        string show_contour_area_value = reader.Get("motion_detection", "show_contour_area_value", "No");
         
         // VIDEO RECORDING
         string output_video_path = reader.Get("video_recording", "output_video_path", "./");
@@ -360,21 +359,20 @@ int main() {
         // Show the result(s) from the response message from the AI Object Detection Service
         string curl_debug_message_on = reader.Get("object_detection", "curl_debug_message_on", "No");    // When No motion rectangles will be drawn on the screen around the moving objects
 
-        // Load the DUMMY mask. The black areas's in the mask are always excluded from Motion detection!
-        vector<Point> my_poly = {Point(0, 0), Point(2560,0), Point(2560, 1440), Point(0, 1440)};
-        Mat mask  = Mat::zeros(1, 1, CV_8U);
-        fillPoly(mask, my_poly, Scalar::all(1));
+        // Load the mask. The black areas's in the mask are always excluded from Motion detection!
+        Mat mask = imread(mask_path, IMREAD_GRAYSCALE);
+        if (mask.empty()) {
+            cout << "Error: Cannot load the mask image." << endl;
+            return -1;
+        }
         // Invert the mask so that black becomes non-transparent and white becomes transparent
         mask = 255 - mask;    
 
         // Fork a new process for CURL asyncTask called postImageAndGetResponse
         pid_t pid2 = fork();
         if (pid2 == 0) {
-          if (AIobject_detection_service == "Yes") {
-            postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  mask,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
-          }
+          postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  mask,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
           return 0; // required!
-
         } else if (pid2 > 0) {
           // Parent process (main)
           } else {
@@ -382,6 +380,7 @@ int main() {
             std::cerr << "Fork for postImageAndGetResponse failed!" << std::endl;
             return 1;
           } 
+
         
         // Initialize camera
         VideoCapture cap(url);
@@ -407,11 +406,17 @@ int main() {
 
         VideoWriter outputVideo;
 
+        // Initialize background subtractor
+        Ptr<BackgroundSubtractor> back_sub;
+        if (background_subtractor_method == "KNN") {
+            back_sub = createBackgroundSubtractorKNN();
+        } else {
+            back_sub = createBackgroundSubtractorMOG2();
+        }
 
         // Initialize variables for recording
-        auto timeCamera = parseDate( "Motion detected: Yes @ 2001-01-01 01:01:01");     
-        auto start_timeCamera = parseDate( "Motion detected: Yes @ 2001-01-01 01:01:01");  
-        
+        chrono::steady_clock::time_point  start_time;
+        chrono::steady_clock::time_point  end_time;
         int frameCounter = 0;
         int teller = 0;
         int obj_detection_each_x_frames = fps * object_detection_time;
@@ -447,13 +452,91 @@ int main() {
                 frameBuffer.pop();  // removes first frame from buffer 
             }            
             
-          
 
+            if (camera_event_detection_by_python != "Yes") {
+              // Apply the mask as an overlay
+              for (int i = 0; i < frame.rows; ++i) {
+                  for (int j = 0; j < frame.cols; ++j) {
+                      if (mask.at<uchar>(i, j) != 0) {
+                          frame.at<Vec3b>(i, j) = Vec3b(0, 0, 0); // Black
+                      }
+                  }
+              }
+      
+            // Apply background subtraction
+            Mat fg_mask;
+            back_sub->apply(frame, fg_mask);
+            // Apply morphological operations to clean up the mask
+            erode(fg_mask, fg_mask, Mat(), Point(-1, -1), 2);
+            dilate(fg_mask, fg_mask, Mat(), Point(-1, -1), 2);
+
+            if (show_motion_fps_date_msg_on_display_window == "Yes") {
+              // put frame number and time on screen
+              time(&now);
+              strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
+              putText(frame_original, '@'+str_frameCounter + " " + time_now_buf, Point(10,frame_height - 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,255,88),2);
+            }
+
+            if (show_motion_fps_date_msg_on_display_console == "Yes") {
+              // put frame number and time on screen
+              // [xK Erases part of the line. If n is 0 (or missing), 
+              // clear from cursor to the end of the line. 
+              // If n is 1, clear from cursor to beginning of the line. 
+              // If n is 2, clear entire line. Cursor position does not change. 
+              time(&now);
+              strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
+              cout << '@'+str_frameCounter + " " + time_now_buf + "\033[K\r"; 
+            }
+
+            // Find contours in the mask
+            vector<vector<Point> > contours;
+            vector<Vec4i> hierarchy;
+            RNG rng(12345);
+            findContours(fg_mask.clone(), contours, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
+            motion_detected = false;
+            // Check for motion after a warm up time to avoid initial writing of a file
+            if (frameCounter >= warmup_time * fps) {
+              vector<Rect>boundRect (contours.size());
+              vector<vector<Point> > contours_poly( contours.size() );
+              for (int i = 0; i < contours.size();i++) {
+                  if (contourArea(contours[i]) <  min_contour_area) {
+                      continue;
+                  }
+                  motion_detected = true;
+                if (show_contour_area_value == "Yes") {          
+                  //  Show the value of the contour area. This can helpt to adjust the value (higher or lower)
+                  cout << "The value of the detected motion contour Area is: " << setprecision(4) << contourArea(contours[i]) << endl;
+                }
+                  
+                if (show_motion_detected_msg_on_display_window == "Yes") {          
+                  //    cout << "Motion detected" << endl;
+                  // put frame number and time on screen
+                  putText(frame_original, "motion detected", Point(10, frame_height - 40), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,255,88),2);
+                }
+                if (show_motion_detected_msg_on_display_console == "Yes") {          
+                  //    cout << "Motion detected" << endl;
+                  // put frame number and time on screen
+                  cout << "motion detected                        \033[K\r";
+                }
+                if (draw_motion_rectangles == "Yes") {
+                  approxPolyDP( contours[i], contours_poly[i], 3, true );
+                  boundRect[i] = boundingRect( contours_poly[i] );
+                  Scalar color = Scalar( rng.uniform(0, 256), rng.uniform(0,256), rng.uniform(0,256) );
+                  rectangle(frame_original, boundRect[i].tl(), boundRect[i].br(), color, 2 );
+                }
+                else {
+                  break;
+                }
+              } // END of for (int i = 0; i < contours.size();i++)
+            } // END of if (frameCounter >= warmup_time * fps)
+          }    // END of if (camera_event_detection_by_python != "Yes") 
+          
+          if (camera_event_detection_by_python == "Yes") {
                 // Read result from shared memory for getTapoMessages
                 sem_wait(&sharedMemory1->mutex);
                 std::string messages_data(sharedMemory1->message);
                 sem_post(&sharedMemory1->mutex);
-                
                       
                 if (show_motion_fps_date_msg_on_display_console == "Yes") {
                   // put frame number and time on screen
@@ -479,14 +562,9 @@ int main() {
                       // Print the result for getTapoMessages
                       // std::cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << std::endl;
 
-                      if (messages_data.rfind("Motion detected: Yes @", 0) == 0) { // pos=0 limits the search to the prefix
-                         motion_detected = true; 
-                         timeCamera = parseDate(messages_data);                    
+                      if (messages_data.rfind("Motion detected @", 0) == 0) { // pos=0 limits the search to the prefix
+                        motion_detected = true;
                       }
-                      if (messages_data.rfind("Motion detected: No @", 0) == 0) { 
-                         timeCamera = parseDate(messages_data); 
-                      }
-
                     // Print the result
                     // std::cout << "Result from asynchronous task: " << messages_data << std::endl;
                 }  // END of if (frameCounter >= warmup_time * fps) 
@@ -504,7 +582,7 @@ int main() {
                 cout << "motion detected                        \033[K\r";
               } 
             } // END of if (motion_detected) {
-
+          }  // END of if (camera_event_detection_by_python == "Yes") 
  
           // This simulation is meant for test purposes e.g. to verify the AI Object detection and saving of pictures                 
           if (simulate_a_motion == "Yes") {
@@ -512,27 +590,49 @@ int main() {
           }
 
 
-          // If recording is on, then check if extra record time must be added and check if record duration has been passed 
+          // If recording is on, then check if extra record time must be added and check if record duration hjas been passed 
           if (recording_on) {
-                // Calculate delta in seconds
-                std::chrono::duration<double> delta_rec = timeCamera - start_timeCamera ;
-                if (motion_detected) {
-                  if (delta_rec.count() >= new_record_duration - before_record_duration_is_passed) {
-                    new_record_duration = new_record_duration + extra_record_time;
-                  }
+              if (motion_detected) {
+                // Get the current time_point
+                auto currentTime = std::chrono::steady_clock::now();
+                // Convert the time_point to a time since epoch
+                auto timeSinceEpoch = currentTime.time_since_epoch();
+                // Convert the time since epoch to seconds and store it as an int
+                int currentTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(timeSinceEpoch).count();
+                // Convert the time_point end_time to a time since epoch
+                auto endTimeSinceEpoch = end_time.time_since_epoch();
+                // Convert the time since epoch to seconds and store it as an int
+                int endTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(endTimeSinceEpoch).count();                  
+                // comparison in integers
+                if (currentTime_seconds_int >= endTime_seconds_int - before_record_duration_is_passed ) {
+                  end_time += chrono::seconds(extra_record_time);
                 }
-                if (delta_rec.count() >= maximum_recording_time * 60) {
-                  new_record_duration = record_duration;
-                }
-                if (show_timing_for_recording == "Yes") {
-                  cout << "motion:" <<motion_detected << " timeCamera - start_timeCamera: " << delta_rec.count() << " new_record_duration: " << new_record_duration << " before_record_duration_is_passed: " << before_record_duration_is_passed << " extra time: " << extra_record_time << endl;
-                }                
+               // else {
+               //   end_time += chrono::seconds(1); // we add 1 extra second as long as motion is detected until extra record_time will be added above
+               // }
+              } // END of  if (motion_detected)
+              // Get the current time_point, need to convert that to integer
+              auto currentTime = std::chrono::steady_clock::now();
+              // Convert the time_point to a time since epoch
+              auto timeSinceEpoch = currentTime.time_since_epoch();
+              // Convert the time since epoch to seconds and store it as an int
+              int currentTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(timeSinceEpoch).count();
+
+              // Convert the time_point start_time to a time since epoch, need to convert that to integer
+              auto startTimeSinceEpoch = start_time.time_since_epoch();
+              // Convert the time since epoch to seconds and store it as an int
+              int startTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(startTimeSinceEpoch).count();                  
+              // comparison in integers
+              if (currentTime_seconds_int - startTime_seconds_int > 60 * maximum_recording_time ) {
+                end_time = chrono::steady_clock::now();
+              }  // END of else branch if (motion_detected)
           }  // END of First! if (recording_on)           
                           
           // If motion detected, start recording and set the record duration
           if (motion_detected and not recording_on) {
                   recording_on = true;
-                  start_timeCamera = timeCamera;
+                  start_time = chrono::steady_clock::now();
+                  end_time = start_time + chrono::seconds(new_record_duration);
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));              
                   cout << "Recording started @ " + string(time_now_buf) << endl;
@@ -544,13 +644,12 @@ int main() {
           // If recording is on, check if standard record duration plus applicable extra record time has been passed. 
           if (recording_on) {
               // Check if it's time to stop recording
-              // Calculate delta in seconds
-              std::chrono::duration<double> delta_rec = timeCamera - start_timeCamera;
-              // cout << delta_rec.count() << " > " << new_record_duration << " ?" << endl;
-              if (delta_rec.count() > new_record_duration) {
+              if (chrono::steady_clock::now() >= end_time) {
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));          
-                  cout << "Recording stopped @ " + string(time_now_buf) << "\033[K\n\n";
+                  cout << "Recording stopped @ " + string(time_now_buf) << "\033[K\n";
+                  start_time = chrono::steady_clock::now();
+                  end_time = chrono::steady_clock::now();
                   recording_on = false;
                   new_record_duration = record_duration; // reset to start value
                   // Release the VideoWriter object
@@ -559,14 +658,33 @@ int main() {
                       return -1;
                   }    
                   outputVideo.release();
-              } // END of if chrono::system_clock::now() >= end_time)
+              } // END of if chrono::steady_clock::now() >= end_time)
               else {          
                   // Write frame to the output video  
                   if (!outputVideo.isOpened()) {
                       cerr << "Could not open the output video file for write\n";
                       return -1;
                   }  
-
+                  if (show_timing_for_recording == "Yes") {
+                  // Get the current time_point, need to convert that to integer
+                  auto currentTime = std::chrono::steady_clock::now();
+                  // Convert the time_point to a time since epoch
+                  auto timeSinceEpoch = currentTime.time_since_epoch();
+                  // Convert the time since epoch to seconds and store it as an int
+                  int currentTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(timeSinceEpoch).count();
+                  
+                  // Convert the time_point end_time to a time since epoch, need to convert that to integer
+                  auto endTimeSinceEpoch = end_time.time_since_epoch();
+                  // Convert the time since epoch to seconds and store it as an int
+                  int endTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(endTimeSinceEpoch).count();                  
+                  
+                  // Convert the time_point start_time to a time since epoch, need to convert that to integer
+                  auto startTimeSinceEpoch = start_time.time_since_epoch();
+                  // Convert the time since epoch to seconds and store it as an int
+                  int startTime_seconds_int = std::chrono::duration_cast<std::chrono::seconds>(startTimeSinceEpoch).count();                  
+                  cout << " motion@ " << motion_detected << " current " << currentTime_seconds_int << " end: " << endTime_seconds_int << " start: " << startTime_seconds_int << " record: " << endTime_seconds_int - startTime_seconds_int << " new duration: " << new_record_duration << " extra: " << extra_record_time << " To go: " << currentTime_seconds_int - startTime_seconds_int << endl;
+                  }
+                  
                   // Write buffered frames to file
                   if (!frameBuffer.empty()) {
                       while (!frameBuffer.empty()) {
@@ -697,6 +815,12 @@ int main() {
               imshow("Motion Detection", frame_original_resized);
           }
 
+          if (show_display_window_with_mask == "Yes") {
+              Mat frame_resized;
+              resize(frame, frame_resized, Size(640,370));     
+              // Display the resulting frame
+              imshow("Motion Detection with Mask", frame_resized);
+          }
           // Check for key press to exit
           if (waitKey(1) == 'q') {
                 break;
