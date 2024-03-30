@@ -2,7 +2,7 @@ MOTION DETECTION WITH RECORDING AND OBJECT IDENTIFICATION ON AN IP CAMERA SUPPOR
 
 Required files
 ..............
-mycMotDetRecPy                  is the C++ program to start on Raspberry Pi 4 (64Bit Bookworm) in a terminal with ./mycMotDetRecPy
+mycMotDetRecPy                  is the C++ program to start on Raspberry Pi 4 /(64Bit Bookworm) in a terminal with ./mycMotDetRecPy, with suffix Ubuntu it stands for Ubuntu 64 bit 23.10)
 mycMotDetRecPy_config.ini       contains all settings to control the program and access the camera stream and optional an AI Object Detection server
 mycMotDetRecPy.cpp              contains the C++ source code
 myTapoEvents.py                 contains the ONVIF based access to the Camera to subscribe for Event messages. 
