@@ -39,6 +39,7 @@ Method 1 consumes too much power and the results for stream 1 (2560x1440) pixels
 
 The following "B" versions support ONLY Method 2 with the embedded Python interpreter. 
 The mycMotDetRecPyB_config.ini is therefore stripped of some unused parameters! 
+Change in myTapoEvents line 14 into:     ini_file = 'mycMotDetRecPyB_config.ini'
 The difference here is that the Timing for recording is based on the parsed Time from the ONVIF XML messages send by the camera.
 The examples above use for recording timing the clock of the PC/ Raspberry Pi 4.
 mycMotDetRecPyB                  is the C++ program to start on Raspberry Pi 4 (64Bit Bookworm) in a terminal with ./mycMotDetRecPy
@@ -47,6 +48,7 @@ mycMotDetRecPyB.cpp              contains the C++ source code
 
 The following "C" versions (similar as "B" but extened with mail!)  support ONLY Method 2 with the embedded Python interpreter AND an EMAIL SMTP function. 
 The mycMotDetRecPyC_config.ini is therefore stripped of some unused parameters and extended with the paramters for mailing via SMTP! 
+Change in myTapoEvents line 14 into:     ini_file = 'mycMotDetRecPyC_config.ini'
 The difference here is that the Timing for recording is based on the parsed Time from the ONVIF XML messages send by the camera.
 The examples above use for recording timing the clock of the PC/ Raspberry Pi 4.
 mycMotDetRecPyB                  is the C++ program to start on Raspberry Pi 4 (64Bit Bookworm) in a terminal with ./mycMotDetRecPy
