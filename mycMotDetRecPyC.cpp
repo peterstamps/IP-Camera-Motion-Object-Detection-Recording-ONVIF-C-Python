@@ -11,11 +11,11 @@
  * sudo apt-get install libcurl4-gnutls-dev
  * sudo apt-get install libjsoncpp-dev
  * sudo ln -s /usr/include/jsoncpp/json/ /usr/include/json
- * sudo apt-get install libcurl4-openssl-dev openssl lipcrypto
+ * sudo apt-get install libcurl4-openssl-dev openssl libcrypto
  * Probably needed as well to suppress messages Install only when they appear: sudo apt-get install libatk-adaptor libgail-common
  * 
  * COMPILE NOW THIS PROGRAM WITH THIS COMMAND, ASSUMING YOU HAVE INSTALLED ALL LIBs op opencv, libcur and jsonccp
- * COMPILE WITH THIS WITH g++  mycMotDetRecPyBC.cpp -o mycMotDetRecPyC $(python3-config --ldflags --cflags --embed)  -I/usr/include/opencv4 -I/usr/include -lopencv_videoio -lopencv_video -lopencv_videostab -lopencv_core -lopencv_imgproc -lopencv_objdetect -lopencv_highgui -lopencv_imgcodecs -ljsoncpp  -lcurl -lssl -lcrypto
+ * COMPILE WITH THIS WITH g++  mycMotDetRecPyC.cpp -o mycMotDetRecPyC $(python3-config --ldflags --cflags --embed)  -I/usr/include/opencv4 -I/usr/include -lopencv_videoio -lopencv_video -lopencv_videostab -lopencv_core -lopencv_imgproc -lopencv_objdetect -lopencv_highgui -lopencv_imgcodecs -ljsoncpp  -lcurl -lssl -lcrypto
  * 
  * */
 
@@ -75,7 +75,8 @@ string base64_encode(const string &input) {
     return result;
 }
 
-string buildAttachment(const string &filename, const string &data) {
+string buildAttachment(string &filename, const string &data) {
+    cout << "***  in build Attachment &filename: " << filename << endl;
     stringstream attachment;
     attachment << "--boundary\r\n";
     attachment << "Content-Type: image/jpeg\r\n";
@@ -85,16 +86,22 @@ string buildAttachment(const string &filename, const string &data) {
     return attachment.str();
 }
 
-int sendEmails(string show_email_status_msg_on_display_console, string mail_email_pictures, const char* smtpServer, const int smtpPort, const char* username, const char* password, const char* senderEmail, const char* recipientEmail, const char* subject, const char* body, const char* attachment_file ) {
+void sendEmails(string show_email_status_msg_on_display_console, string mail_email_pictures, 
+     const char* smtpServer, const int smtpPort, const char* username, const char* password, 
+     const char* senderEmail, const char* recipientEmail, const char* subject, const char* body, 
+     string attachment_file_fullpathname, string attachment_filename ) {
 
     if (show_email_status_msg_on_display_console == "Yes") {
-      cout << "***  Get SMTP server IP address" << endl;
+      cout << "***  MAIL INFORMATION" << endl;
+      cout << "***  Storage pathname of the attachment file : " << attachment_file_fullpathname << endl;
+      cout << "***  The name of the embedded attachment file: " << attachment_filename << endl;
+      cout << "\n***  Get SMTP server IP address" << endl;
     }
     // Get SMTP server IP address
     struct hostent *server = gethostbyname(smtpServer);
     if (server == NULL) {
         cerr << "Error: Failed to resolve SMTP server hostname: " << smtpServer << endl;
-        return 1;
+        return;
     }
     char* smtpServerIP = inet_ntoa(*((struct in_addr*) server->h_addr));
 
@@ -112,7 +119,7 @@ int sendEmails(string show_email_status_msg_on_display_console, string mail_emai
     int clientSocket = socket(AF_INET, SOCK_STREAM, 0);
     if (clientSocket == -1) {
         cerr << "Error: Failed to create socket." << endl;
-        return 1;
+        return;
     }
     if (show_email_status_msg_on_display_console == "Yes") {
       cout << "***  Connect to SMTP server without SSL" << endl;
@@ -126,7 +133,7 @@ int sendEmails(string show_email_status_msg_on_display_console, string mail_emai
     if (connect(clientSocket, (struct sockaddr *)&serverAddress, sizeof(serverAddress)) == -1) {
         cerr << "Error: Connection to SMTP server failed." << endl;
         close(clientSocket);
-        return 1;
+        return;
     }
 
 
@@ -167,7 +174,7 @@ int sendEmails(string show_email_status_msg_on_display_console, string mail_emai
         cerr << "Error: SSL connection failed." << endl;
         SSL_free(ssl);
         close(clientSocket);
-        return 1;
+        return;
     }
 
     // Send EHLO command over SSL
@@ -250,22 +257,22 @@ int sendEmails(string show_email_status_msg_on_display_console, string mail_emai
       emailData += "Content-Type: multipart/mixed; boundary=boundary\r\n\r\n";
       emailData += "--boundary\r\n";
       emailData += "Content-Type: text/plain\r\n\r\n";
-      emailData += string(body) + "\r\n";
+      emailData += string(body) + " The attached file was saved at: " + attachment_file_fullpathname + "\r\n";
 
       if (show_email_status_msg_on_display_console == "Yes") {
         cout << "***  Read attachment file and append attachment to email data" << endl;
       }
       // Read attachment file and append attachment to email data
-      ifstream file(attachment_file, ios::binary);
+      ifstream file(attachment_file_fullpathname, ios::binary);
       if (file) {
           string attachment((istreambuf_iterator<char>(file)), (istreambuf_iterator<char>()));
-          emailData += buildAttachment("image.jpg", attachment);
+          emailData += buildAttachment(attachment_filename, attachment);
           file.close();
       } else {
           cerr << "Error: Failed to open JPG file." << endl;
           SSL_free(ssl);
           close(clientSocket);
-          return 1;
+          return;
       }
       
       // End MIME boundary
@@ -316,7 +323,7 @@ int sendEmails(string show_email_status_msg_on_display_console, string mail_emai
     if (show_email_status_msg_on_display_console == "Yes") {
       cout << "***  End of mail function" << endl;
     }
-    return 0;
+    return;
 }
 
 
@@ -359,8 +366,7 @@ struct SharedMemory {
     sem_t mutex;
 };
 
-void getTapoMessages(SharedMemory* sharedMemory) {
-
+void getTapoMessages(SharedMemory* sharedMemory, const char* moduleName, const char* functionName) {
       PyObject *pModuleName, *pModule, *pFunc;
       PyObject *pArgs, *pTupleValue, *pValue;
       const char*  pFunctionName;
@@ -372,8 +378,8 @@ void getTapoMessages(SharedMemory* sharedMemory) {
 
       /* Error checking of pName left out */
 
-      pModuleName = PyUnicode_DecodeFSDefault("myTapoEvents");
-      pFunctionName = "getTapoEventMessage";
+      pModuleName = PyUnicode_DecodeFSDefault(moduleName);
+      pFunctionName = functionName;
       
       pModule = PyImport_Import(pModuleName);
       Py_DECREF(pModuleName);
@@ -424,15 +430,17 @@ void getTapoMessages(SharedMemory* sharedMemory) {
         else {
             if (PyErr_Occurred())
                 PyErr_Print();
-            fprintf(stderr, "Cannot find function getTapoEventMessage\n");
+            fprintf(stderr, "Cannot find the Python function (default is: getTapoEventMessage). Check .ini file.\n");
+            cout << "Looking for: " << functionName << endl;
         }
         Py_XDECREF(pFunc);
         Py_DECREF(pModule);
     }
     else {
         PyErr_Print();
-        fprintf(stderr, "Failed to load myTapoEvents\n");
-        //return;
+        fprintf(stderr, "Failed to load the Python module (default is: myTapoEvents). Check .ini file.\n");
+        cout << "Looking for: " << moduleName << ".py" << endl;
+
     }
    
 }
@@ -535,6 +543,130 @@ int main() {
     // Register signal and signal handler. Used to check if CTRL-c has been pressed in console!
     signal(SIGINT, signal_callback_handler);  
     
+   INIReader reader("mycMotDetRecPyC_config.ini");
+    if (reader.ParseError() < 0) {
+        cout << "Error: Cannot load config.ini" << endl;
+        return 1;
+    }
+    // CAMERA
+    // Read variables from the .ini file
+    // Full rtsp URL of IP camera inluding user name and password when required
+    string url = reader.Get("camera", "url", "");
+    
+    // MOTION DETECTION
+    // Path to the mask file
+    string mask_path = reader.Get("motion_detection", "mask_path", "");
+    // Warm up time. The time to be passed after start of program. Hereafter motion dectection will start.
+    int warmup_time = reader.GetInteger("motion_detection", "warmup_time", 3);
+    // Simulate a motion Default No. (used for test purposes)
+    string simulate_a_motion = reader.Get("motion_detection", "simulate_a_motion", "No");
+    // Show the display window in a resized frame (but not with a mask)
+    string show_display_window = reader.Get("motion_detection", "show_display_window", "No");
+    // Show the display window in its original frame (not resized)
+    string show_display_window_not_resized = reader.Get("motion_detection", "show_display_window_not_resized", "No");
+    // Show indicator that motion has been detected on display window       
+    string show_motion_detected_msg_on_display_window = reader.Get("motion_detection", "show_motion_detected_msg_on_display_window", "No");
+    // Show the fps and the date and time on the display window
+    string show_motion_fps_date_msg_on_display_window = reader.Get("motion_detection", "show_motion_fps_date_msg_on_display_window", "No");
+    // Show indicator that motion has been detected on display console (terminal window)
+    string show_motion_detected_msg_on_display_console = reader.Get("motion_detection", "show_motion_detected_msg_on_display_console", "No");
+    // Show the fps and the date and time on the display  console (terminal window)
+    string show_motion_fps_date_msg_on_display_console = reader.Get("motion_detection", "show_motion_fps_date_msg_on_display_console", "No");
+    
+    // VIDEO RECORDING
+    string output_video_path = reader.Get("video_recording", "output_video_path", "./");
+    // Output prefix video file
+    string prefix_output_video = reader.Get("video_recording", "prefix_output_video", "Vid_");
+    // Extension of the video file
+    string extension_of_video = reader.Get("video_recording", "extension_of_video", ".avi");
+    // The Frames per second that your camera uses
+    int fps = reader.GetInteger("video_recording", "fps", 15);
+    // The codec to be used for writing the videos
+    string codecString = reader.Get("video_recording", "codec", "XVID");
+    float maximum_recording_time = reader.GetFloat("video_recording", "maximum_recording_time", 2.5);
+    // Record duration in seconds
+    int record_duration = reader.GetInteger("video_recording", "record_duration", 10);
+    // Buffer x seconds the frames before a (new) motion is detected
+    int buffer_before_motion = reader.GetInteger("video_recording", "buffer_before_motion", 5);
+    // Extra time to add to the record duration if new motion is detected
+    int extra_record_time = reader.GetInteger("video_recording", "extra_record_time", 5);
+    // Pre-motion recording duration in second. The time before recording should stop wiil be used to detect uf new motion happened.
+    int before_record_duration_is_passed = reader.GetInteger("video_recording", "before_record_duration_is_passed", 3);
+    // Output video parameters
+    string show_timing_for_recording = reader.Get("video_recording", "show_timing_for_recording", "No");
+    
+    // OBJECT DETECTION    
+    // AI Object Detection Service URL
+    string AIserverUrl = reader.Get("object_detection", "AIserverUrl", "http://localhost:80/v1/vision/detection");
+    // Only when an AI object Detection service is installed Object Detection will happen
+    string AIobject_detection_service = reader.Get("object_detection", "AIobject_detection_service", "No");
+    // Thresholds for object detection: this is the minimum percentage (fraction) when an object signaled as recognised
+    string min_confidence = reader.Get("motion_detection", "min_confidence", "0.4");  
+    // Try to find the defined objects and signal them when as recognised
+    string string_of_objects_for_detection = reader.Get("object_detection", "string_of_objects_for_detection", "person");    
+    // Split the comma-separated string string_of_objects_for_detection into individual values
+    vector<string> objects_for_detection = splitString(string_of_objects_for_detection, ',');
+    // Try to find the defined objects and signal them when as recognised
+    string draw_object_rectangles = reader.Get("object_detection", "draw_object_rectangles", "person");    
+    // Object detection will repeat after x seconds (default 5) when motion has been detected
+    int object_detection_time = reader.GetInteger("object_detection", "object_detection_time", 3);
+   // Output picture parameters
+    string output_obj_picture_path = reader.Get("object_detection", "output_obj_picture_path", "./");
+   // Output prefix picture file
+    string prefix_output_picture = reader.Get("object_detection", "prefix_output_picture", "Pic_");
+    // Show the full json response message from the AI Object Detection Service
+    string show_AIResponse_message = reader.Get("object_detection", "show_AIResponse_message", "No");
+    // Show the result(s) from the response message from the AI Object Detection Service
+    string show_AIObjDetectionResult = reader.Get("object_detection", "show_AIObjDetectionResult", "No");    // When No motion rectangles will be drawn on the screen around the moving objects
+    // Show the result(s) from the response message from the AI Object Detection Service
+    string curl_debug_message_on = reader.Get("object_detection", "curl_debug_message_on", "No");    // When No motion rectangles will be drawn on the screen around the moving objects
+
+    // PYTHON RUNTIME    
+    // Define the python module name (without .py) extention that handles the ONVIF events messages
+    string py_moduleName = reader.Get("python_runtime", "moduleName", "myTapoEvents");   
+    // Define the python function name that should be called to execute
+    string py_functionName = reader.Get("python_runtime", "functionName", "getTapoEventMessage");   
+
+     // Set the Python runtime configuration MUST be const char* in stead of string
+    const char* moduleName = py_moduleName.c_str();
+    const char* functionName = py_functionName.c_str();
+
+    // MAIL SMTP SERVER    
+    // Allow sending of emails?
+    string mail_sendMails = reader.Get("mail_SMTP_server", "sendMails", "No");   
+    // set the host address of the SMTP email server e.g. smtp.gmail.com
+    string mail_smtpServer = reader.Get("mail_SMTP_server", "smtpServer", "");   
+    // set the port number of the SMTP email server e.g. 587 is common
+    int mail_smtpPort = reader.GetInteger("mail_SMTP_server", "smtpPort", 587);  
+    // set the emailaddress of username (this is the account) for the SMTP email server 
+    string mail_email_username = reader.Get("mail_SMTP_server", "email_username", "");   
+    // set the email password (this is the account password) for the SMTP email server 
+    string mail_email_password = reader.Get("mail_SMTP_server", "email_password", "");   
+    // set the emailaddress of the sender of the email (complete email address) 
+    string mail_senderEmail = reader.Get("mail_SMTP_server", "senderEmail", "");   
+    // set the emailaddress of the receiver of the email (complete email address) 
+    string mail_recipientEmail = reader.Get("mail_SMTP_server", "recipientEmail", "");   
+    // set the subject for the email (title of the mail) 
+    string mail_email_subject = reader.Get("mail_SMTP_server", "email_subject", "");   
+    // set the body text for the email (the text content of the mail) 
+    string mail_email_body = reader.Get("mail_SMTP_server", "email_body", "This is a test email with an attached file.");   
+    // should a picture of an AI object recognition be attached to the mail?
+    string mail_email_pictures = reader.Get("mail_SMTP_server", "email_pictures", "Yes");   
+    // should a picture of an AI object recognition be attached to the mail?
+    string show_email_status_msg_on_display_console = reader.Get("mail_SMTP_server", "show_email_status_msg_on_display_console", "Yes");   
+
+
+    // SMTP server configuration
+    const char* smtpServer = mail_smtpServer.c_str();
+    const int   smtpPort = mail_smtpPort;
+    const char* username = mail_email_username.c_str();
+    const char* password = mail_email_password.c_str();
+    const char* senderEmail = mail_senderEmail.c_str();
+    const char* recipientEmail = mail_recipientEmail.c_str();
+    const char* subject = mail_email_subject.c_str();
+    const char* body = mail_email_body.c_str();
+
+
     // Create shared memory for getTapoMessages
     int shm_fd1 = shm_open("/my_shared_memory1", O_CREAT | O_RDWR, 0666);
     ftruncate(shm_fd1, sizeof(SharedMemory));
@@ -547,131 +679,19 @@ int main() {
     SharedMemory* sharedMemory2 = (SharedMemory*)mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd2, 0);
     sem_init(&sharedMemory2->mutex, 1, 1); // Initialize semaphore for postImageAndGetResponse
 
+
+
     pid_t pid1 = fork();
     if (pid1 == 0) {
         // Child process (getTapoMessages)
-        getTapoMessages(sharedMemory1);
+        getTapoMessages(sharedMemory1, moduleName, functionName);
         return 0;  // required!
     } else if (pid1 > 0) {
         // Parent process (main)
         // Do other work while getTapoMessages is running...
    
         
-        INIReader reader("mycMotDetRecPyC_config.ini");
-        if (reader.ParseError() < 0) {
-            cout << "Error: Cannot load config.ini" << endl;
-            return 1;
-        }
-        // CAMERA
-        // Read variables from the .ini file
-        // Full rtsp URL of IP camera inluding user name and password when required
-        string url = reader.Get("camera", "url", "");
-        
-        // MOTION DETECTION
-        // Path to the mask file
-        string mask_path = reader.Get("motion_detection", "mask_path", "");
-        // Warm up time. The time to be passed after start of program. Hereafter motion dectection will start.
-        int warmup_time = reader.GetInteger("motion_detection", "warmup_time", 3);
-        // Simulate a motion Default No. (used for test purposes)
-        string simulate_a_motion = reader.Get("motion_detection", "simulate_a_motion", "No");
-        // Show the display window in a resized frame (but not with a mask)
-        string show_display_window = reader.Get("motion_detection", "show_display_window", "No");
-        // Show the display window in its original frame (not resized)
-        string show_display_window_not_resized = reader.Get("motion_detection", "show_display_window_not_resized", "No");
-        // Show indicator that motion has been detected on display window       
-        string show_motion_detected_msg_on_display_window = reader.Get("motion_detection", "show_motion_detected_msg_on_display_window", "No");
-        // Show the fps and the date and time on the display window
-        string show_motion_fps_date_msg_on_display_window = reader.Get("motion_detection", "show_motion_fps_date_msg_on_display_window", "No");
-        // Show indicator that motion has been detected on display console (terminal window)
-        string show_motion_detected_msg_on_display_console = reader.Get("motion_detection", "show_motion_detected_msg_on_display_console", "No");
-        // Show the fps and the date and time on the display  console (terminal window)
-        string show_motion_fps_date_msg_on_display_console = reader.Get("motion_detection", "show_motion_fps_date_msg_on_display_console", "No");
-        
-        // VIDEO RECORDING
-        string output_video_path = reader.Get("video_recording", "output_video_path", "./");
-        // Output prefix video file
-        string prefix_output_video = reader.Get("video_recording", "prefix_output_video", "Vid_");
-        // Extension of the video file
-        string extension_of_video = reader.Get("video_recording", "extension_of_video", ".avi");
-        // The Frames per second that your camera uses
-        int fps = reader.GetInteger("video_recording", "fps", 15);
-        // The codec to be used for writing the videos
-        string codecString = reader.Get("video_recording", "codec", "XVID");
-        float maximum_recording_time = reader.GetFloat("video_recording", "maximum_recording_time", 2.5);
-        // Record duration in seconds
-        int record_duration = reader.GetInteger("video_recording", "record_duration", 10);
-        // Buffer x seconds the frames before a (new) motion is detected
-        int buffer_before_motion = reader.GetInteger("video_recording", "buffer_before_motion", 5);
-        // Extra time to add to the record duration if new motion is detected
-        int extra_record_time = reader.GetInteger("video_recording", "extra_record_time", 5);
-        // Pre-motion recording duration in second. The time before recording should stop wiil be used to detect uf new motion happened.
-        int before_record_duration_is_passed = reader.GetInteger("video_recording", "before_record_duration_is_passed", 3);
-        // Output video parameters
-        string show_timing_for_recording = reader.Get("video_recording", "show_timing_for_recording", "No");
-        
-        // OBJECT DETECTION    
-        // AI Object Detection Service URL
-        string AIserverUrl = reader.Get("object_detection", "AIserverUrl", "http://localhost:80/v1/vision/detection");
-        // Only when an AI object Detection service is installed Object Detection will happen
-        string AIobject_detection_service = reader.Get("object_detection", "AIobject_detection_service", "No");
-        // Thresholds for object detection: this is the minimum percentage (fraction) when an object signaled as recognised
-        string min_confidence = reader.Get("motion_detection", "min_confidence", "0.4");  
-        // Try to find the defined objects and signal them when as recognised
-        string string_of_objects_for_detection = reader.Get("object_detection", "string_of_objects_for_detection", "person");    
-        // Split the comma-separated string string_of_objects_for_detection into individual values
-        vector<string> objects_for_detection = splitString(string_of_objects_for_detection, ',');
-        // Try to find the defined objects and signal them when as recognised
-        string draw_object_rectangles = reader.Get("object_detection", "draw_object_rectangles", "person");    
-        // Object detection will repeat after x seconds (default 5) when motion has been detected
-        int object_detection_time = reader.GetInteger("object_detection", "object_detection_time", 3);
-       // Output picture parameters
-        string output_obj_picture_path = reader.Get("object_detection", "output_obj_picture_path", "./");
-       // Output prefix picture file
-        string prefix_output_picture = reader.Get("object_detection", "prefix_output_picture", "Pic_");
-        // Show the full json response message from the AI Object Detection Service
-        string show_AIResponse_message = reader.Get("object_detection", "show_AIResponse_message", "No");
-        // Show the result(s) from the response message from the AI Object Detection Service
-        string show_AIObjDetectionResult = reader.Get("object_detection", "show_AIObjDetectionResult", "No");    // When No motion rectangles will be drawn on the screen around the moving objects
-        // Show the result(s) from the response message from the AI Object Detection Service
-        string curl_debug_message_on = reader.Get("object_detection", "curl_debug_message_on", "No");    // When No motion rectangles will be drawn on the screen around the moving objects
-
-        // MAIL SMTP SERVER    
-        // Allow sending of emails?
-        string mail_sendMails = reader.Get("mail_SMTP_server", "sendMails", "No");   
-        // set the host address of the SMTP email server e.g. smtp.gmail.com
-        string mail_smtpServer = reader.Get("mail_SMTP_server", "smtpServer", "");   
-        // set the port number of the SMTP email server e.g. 587 is common
-        int mail_smtpPort = reader.GetInteger("mail_SMTP_server", "smtpPort", 587);  
-        // set the emailaddress of username (this is the account) for the SMTP email server 
-        string mail_email_username = reader.Get("mail_SMTP_server", "email_username", "");   
-        // set the email password (this is the account password) for the SMTP email server 
-        string mail_email_password = reader.Get("mail_SMTP_server", "email_password", "");   
-        // set the emailaddress of the sender of the email (complete email address) 
-        string mail_senderEmail = reader.Get("mail_SMTP_server", "senderEmail", "");   
-        // set the emailaddress of the receiver of the email (complete email address) 
-        string mail_recipientEmail = reader.Get("mail_SMTP_server", "recipientEmail", "");   
-        // set the subject for the email (title of the mail) 
-        string mail_email_subject = reader.Get("mail_SMTP_server", "email_subject", "");   
-        // set the body text for the email (the text content of the mail) 
-        string mail_email_body = reader.Get("mail_SMTP_server", "email_body", "This is a test email with an attached file.");   
-        // should a picture of an AI object recognition be attached to the mail?
-        string mail_email_pictures = reader.Get("mail_SMTP_server", "email_pictures", "Yes");   
-        // should a picture of an AI object recognition be attached to the mail?
-        string show_email_status_msg_on_display_console = reader.Get("mail_SMTP_server", "show_email_status_msg_on_display_console", "Yes");   
-
-
-        // SMTP server configuration
-        const char* smtpServer = mail_smtpServer.c_str();
-        const int   smtpPort = mail_smtpPort;
-        const char* username = mail_email_username.c_str();
-        const char* password = mail_email_password.c_str();
-        const char* senderEmail = mail_senderEmail.c_str();
-        const char* recipientEmail = mail_recipientEmail.c_str();
-        const char* subject = mail_email_subject.c_str();
-        const char* body = mail_email_body.c_str();
-        string mail_attachment_file = "";
-        const char* attachment_file = mail_attachment_file.c_str();
-
+ 
         // Load the DUMMY mask. The black areas's in the mask are always excluded from Motion detection!
         vector<Point> my_poly = {Point(0, 0), Point(2560,0), Point(2560, 1440), Point(0, 1440)};
         Mat mask  = Mat::zeros(1, 1, CV_8U);
@@ -990,12 +1010,17 @@ int main() {
                   }
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
-                  string AI_object_picture_filename = output_obj_picture_path + prefix_output_picture + time_now_buf + "_" + result.label + ".jpg";
-                  imwrite(AI_object_picture_filename, frame_original);  
-                  cout << "Saved: " << AI_object_picture_filename << endl;
+                  string AI_object_picture_filename = prefix_output_picture + time_now_buf + "_" + result.label + ".jpg";
+                  string AI_object_picture_file_fullpathname = output_obj_picture_path + AI_object_picture_filename;
+                  
+                  imwrite(AI_object_picture_file_fullpathname, frame_original);  
+                  cout << "Saved: " << AI_object_picture_file_fullpathname << endl;
+                  
                   if (mail_sendMails == "Yes") {
-                        attachment_file = AI_object_picture_filename.c_str();
-                        sendEmails(show_email_status_msg_on_display_console, mail_email_pictures, smtpServer, smtpPort, username, password, senderEmail, recipientEmail, subject, body, attachment_file );
+                      // Call sendEmails function in a separate thread
+                      thread emailThread(sendEmails, show_email_status_msg_on_display_console, mail_email_pictures, smtpServer, smtpPort, username, password, senderEmail, recipientEmail, subject, body, AI_object_picture_file_fullpathname, AI_object_picture_filename );
+                      // Detach the thread so it runs independently
+                      emailThread.detach();
                   }
 
                   } // END if (found) 
