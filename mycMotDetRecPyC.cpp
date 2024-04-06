@@ -58,7 +58,7 @@
 using namespace cv;
 using namespace std;
 
-const int MAIL_BUFFER_SIZE = 5120;
+const int MAIL_BUFFER_SIZE = 1024;
 
 string base64_encode(const string &input) {
     BIO *bio, *b64;
@@ -76,7 +76,6 @@ string base64_encode(const string &input) {
 }
 
 string buildAttachment(string &filename, const string &data) {
-    cout << "***  in build Attachment &filename: " << filename << endl;
     stringstream attachment;
     attachment << "--boundary\r\n";
     attachment << "Content-Type: image/jpeg\r\n";
@@ -145,7 +144,6 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }
 
-
     // Send EHLO command
     string ehloCommand = "EHLO client\r\n";
     send(clientSocket, ehloCommand.c_str(), ehloCommand.size(), 0);
@@ -198,7 +196,6 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }    
 
-
     // Send base64 encoded username
     string usernameBase64 = base64_encode(username);
     SSL_write(ssl, (usernameBase64 + "\r\n").c_str(), usernameBase64.size() + 2);
@@ -235,7 +232,6 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }   
 
-
     // Send DATA command
     string dataCommand = "DATA\r\n";
     SSL_write(ssl, dataCommand.c_str(), dataCommand.size());
@@ -245,7 +241,6 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }
    
-
     if (show_email_status_msg_on_display_console == "Yes") {
       cout << "***  Send email headers and body" << endl;
     }
@@ -267,6 +262,8 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       if (file) {
           string attachment((istreambuf_iterator<char>(file)), (istreambuf_iterator<char>()));
           emailData += buildAttachment(attachment_filename, attachment);
+          attachment.clear();
+          attachment_filename.clear();
           file.close();
       } else {
           cerr << "Error: Failed to open JPG file." << endl;
@@ -293,6 +290,7 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
     // Send email data
     SSL_write(ssl, emailData.c_str(), emailData.size());
     SSL_read(ssl, buffer, MAIL_BUFFER_SIZE);
+    emailData.clear();
     if (show_email_status_msg_on_display_console == "Yes") {
       cout << "***  Response after send email data" << endl;
       cout << buffer << endl;
@@ -327,16 +325,13 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
 }
 
 
-
-
 VideoWriter outputVideo;
-
 
 // Define the function to be called when ctrl-c (SIGINT) is sent to process
 void signal_callback_handler(int signum) {
-   cout << "Caught signal CTRL-c. Program stops."  << endl;
-   // Terminate program
-   exit(signum);
+    cout << "Caught signal CTRL-c. Program stops."  << endl;
+    // Terminate program
+    exit(signum);
 }
 
 // Function to split a string by delimiter
@@ -359,14 +354,20 @@ struct DetectionResult {
 };
 
 
-const int BUFFER_SIZE = 2048;
+const int BUFFER_SIZE = 1024;
 
-struct SharedMemory {
-    char message[BUFFER_SIZE];
-    sem_t mutex;
+struct SharedMemory1 {
+    char message1[BUFFER_SIZE];
+    sem_t mutex1;
 };
 
-void getTapoMessages(SharedMemory* sharedMemory, const char* moduleName, const char* functionName) {
+struct SharedMemory2 {
+    char message2[BUFFER_SIZE];
+    sem_t mutex2;
+};
+
+
+void getTapoMessages(SharedMemory1* sharedMemory1, const char* moduleName, const char* functionName) {
       PyObject *pModuleName, *pModule, *pFunc;
       PyObject *pArgs, *pTupleValue, *pValue;
       const char*  pFunctionName;
@@ -410,10 +411,9 @@ void getTapoMessages(SharedMemory* sharedMemory, const char* moduleName, const c
                       // cout << "Saved string value: " << savedString << endl;
                       //cout << savedString << endl;
                       // Write result to shared memory
-                      sem_wait(&sharedMemory->mutex);
-                      //snprintf(sharedMemory->message, BUFFER_SIZE, "AsyncTask1: IntValue = %d, StringValue = %s", intValue, stringValue.c_str());
-                      snprintf(sharedMemory->message, BUFFER_SIZE, "%s", savedString);
-                      sem_post(&sharedMemory->mutex); 
+                      sem_wait(&sharedMemory1->mutex1);
+                      snprintf(sharedMemory1->message1, BUFFER_SIZE, "%s", savedString);
+                      sem_post(&sharedMemory1->mutex1); 
                       //sleep(1);   // slow down the speed 0.3 seconds, too fast leads to too much errors                   
                   }
                   Py_DECREF(pValue);
@@ -450,7 +450,7 @@ size_t write_data(void *ptr, size_t size, size_t nmemb, string *data) {
     return size * nmemb;
 }
 
-void postImageAndGetResponse(SharedMemory* sharedMemory, string& AIserverUrl, string& min_confidence, Mat& frame, string& show_AIResponse_message, string& show_AIObjDetectionResult, string& curl_debug_message_on) {
+void postImageAndGetResponse(SharedMemory2* sharedMemory2, string& AIserverUrl, string& min_confidence, Mat& frame, string& show_AIResponse_message, string& show_AIObjDetectionResult, string& curl_debug_message_on) {
     CURL *curl;
     CURLcode res;
     string response_data;
@@ -519,10 +519,9 @@ void postImageAndGetResponse(SharedMemory* sharedMemory, string& AIserverUrl, st
       // Simulate some time-consuming operation
       // sleep(3);
       // Write result to shared memory
-      sem_wait(&sharedMemory->mutex);
-      // snprintf(sharedMemory->message, BUFFER_SIZE, "AsyncTask2: IntValue = %d, StringValue = %s", intValue, stringValue.c_str());
-      snprintf(sharedMemory->message, BUFFER_SIZE, "%s", response_data.c_str());
-      sem_post(&sharedMemory->mutex);
+      sem_wait(&sharedMemory2->mutex2);
+      snprintf(sharedMemory2->message2, BUFFER_SIZE, "%s", response_data.c_str());
+      sem_post(&sharedMemory2->mutex2);
 }
 
 // Function to parse date string
@@ -669,29 +668,29 @@ int main() {
 
     // Create shared memory for getTapoMessages
     int shm_fd1 = shm_open("/my_shared_memory1", O_CREAT | O_RDWR, 0666);
-    ftruncate(shm_fd1, sizeof(SharedMemory));
-    SharedMemory* sharedMemory1 = (SharedMemory*)mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd1, 0);
-    sem_init(&sharedMemory1->mutex, 1, 1); // Initialize semaphore for getTapoMessages
+    ftruncate(shm_fd1, sizeof(SharedMemory1));
+    SharedMemory1* sharedMemory1 = (SharedMemory1*)mmap(NULL, sizeof(SharedMemory1), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd1, 0);
+    sem_init(&sharedMemory1->mutex1, 1, 1); // Initialize semaphore for getTapoMessages
 
     // Create shared memory for postImageAndGetResponse
     int shm_fd2 = shm_open("/my_shared_memory2", O_CREAT | O_RDWR, 0666);
-    ftruncate(shm_fd2, sizeof(SharedMemory));
-    SharedMemory* sharedMemory2 = (SharedMemory*)mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd2, 0);
-    sem_init(&sharedMemory2->mutex, 1, 1); // Initialize semaphore for postImageAndGetResponse
-
+    ftruncate(shm_fd2, sizeof(SharedMemory2));
+    SharedMemory2* sharedMemory2 = (SharedMemory2*)mmap(NULL, sizeof(SharedMemory2), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd2, 0);
+    sem_init(&sharedMemory2->mutex2, 1, 1); // Initialize semaphore for postImageAndGetResponse
 
 
     pid_t pid1 = fork();
     if (pid1 == 0) {
         // Child process (getTapoMessages)
         getTapoMessages(sharedMemory1, moduleName, functionName);
+        // Clean up
+        sem_destroy(&sharedMemory1->mutex1);
+        shm_unlink("/my_shared_memory1");        
         return 0;  // required!
     } else if (pid1 > 0) {
         // Parent process (main)
         // Do other work while getTapoMessages is running...
    
-        
- 
         // Load the DUMMY mask. The black areas's in the mask are always excluded from Motion detection!
         vector<Point> my_poly = {Point(0, 0), Point(2560,0), Point(2560, 1440), Point(0, 1440)};
         Mat mask  = Mat::zeros(1, 1, CV_8U);
@@ -778,50 +777,48 @@ int main() {
             if (frameBuffer.size() > bufferSize) {
                 frameBuffer.pop();  // removes first frame from buffer 
             }            
+
+            // Read result from shared memory for getTapoMessages
+            sem_wait(&sharedMemory1->mutex1);
+            string messages_data(sharedMemory1->message1);
+            sem_post(&sharedMemory1->mutex1);
             
-          
+                  
+            if (show_motion_fps_date_msg_on_display_console == "Yes") {
+              // put frame number and time on screen
+              // [xK Erases part of the line. If n is 0 (or missing), 
+              // clear from cursor to the end of the line. 
+              // If n is 1, clear from cursor to beginning of the line. 
+              // If n is 2, clear entire line. Cursor position does not change. 
+              time(&now);
+              strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
+              cout << "@" << str_frameCounter << " " << time_now_buf  << ". Camera: " << messages_data << "\r"; 
+            }
+            if (show_motion_fps_date_msg_on_display_window == "Yes") {
+              // put frame number and time on screen
+              time(&now);
+              strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
+              putText(frame_original, '@'+str_frameCounter + " " + time_now_buf, Point(10,frame_height - 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,255,88),2);
+            }
+                   
+            motion_detected = false;
+            
+            // Check for motion after a warm up time to avoid initial writing of a file
+            if (frameCounter >= warmup_time * fps) {
+                  // Print the result for getTapoMessages
+                  // cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << endl;
 
-                // Read result from shared memory for getTapoMessages
-                sem_wait(&sharedMemory1->mutex);
-                string messages_data(sharedMemory1->message);
-                sem_post(&sharedMemory1->mutex);
-                
-                      
-                if (show_motion_fps_date_msg_on_display_console == "Yes") {
-                  // put frame number and time on screen
-                  // [xK Erases part of the line. If n is 0 (or missing), 
-                  // clear from cursor to the end of the line. 
-                  // If n is 1, clear from cursor to beginning of the line. 
-                  // If n is 2, clear entire line. Cursor position does not change. 
-                  time(&now);
-                  strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
-                  cout << "@" << str_frameCounter << " " << time_now_buf  << ". Camera: " << messages_data << "\r"; 
-                }
-                if (show_motion_fps_date_msg_on_display_window == "Yes") {
-                  // put frame number and time on screen
-                  time(&now);
-                  strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
-                  putText(frame_original, '@'+str_frameCounter + " " + time_now_buf, Point(10,frame_height - 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,255,88),2);
-                }
-                       
-                motion_detected = false;
-                
-                // Check for motion after a warm up time to avoid initial writing of a file
-                if (frameCounter >= warmup_time * fps) {
-                      // Print the result for getTapoMessages
-                      // cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << endl;
+                  if (messages_data.rfind("Motion detected: Yes @", 0) == 0) { // pos=0 limits the search to the prefix
+                     motion_detected = true; 
+                     timeCamera = parseDate(messages_data);                    
+                  }
+                  if (messages_data.rfind("Motion detected: No @", 0) == 0) { 
+                     timeCamera = parseDate(messages_data); 
+                  }
 
-                      if (messages_data.rfind("Motion detected: Yes @", 0) == 0) { // pos=0 limits the search to the prefix
-                         motion_detected = true; 
-                         timeCamera = parseDate(messages_data);                    
-                      }
-                      if (messages_data.rfind("Motion detected: No @", 0) == 0) { 
-                         timeCamera = parseDate(messages_data); 
-                      }
-
-                    // Print the result
-                    // cout << "Result from asynchronous task: " << messages_data << endl;
-                }  // END of if (frameCounter >= warmup_time * fps) 
+                // Print the result
+                // cout << "Result from asynchronous task: " << messages_data << endl;
+            }  // END of if (frameCounter >= warmup_time * fps) 
 
             // When motion has been detected and displays are required
             if (motion_detected) {
@@ -925,12 +922,12 @@ int main() {
               postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  frame,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
 
               // Read result from shared memory for postImageAndGetResponse
-              sem_wait(&sharedMemory2->mutex);
-              string response_data(sharedMemory2->message);
-              sem_post(&sharedMemory2->mutex);
+              sem_wait(&sharedMemory2->mutex2);
+              string response_data(sharedMemory2->message2);
+              sem_post(&sharedMemory2->mutex2);
               
               // check if there is some content in the shared buffer
-              if (strlen(sharedMemory2->message) > 0) {
+              if (strlen(sharedMemory2->message2) > 0) {
                 // Print the result for postImageAndGetResponse
                 // cout << "Result from postImageAndGetResponse asynchronous task: " << response_data << endl;
                 
@@ -979,11 +976,11 @@ int main() {
               } // END of if (strlen(sharedMemory2->message) > 0)
 
               // Clean up
-              sem_destroy(&sharedMemory1->mutex);
-              sem_destroy(&sharedMemory2->mutex);
+              sem_destroy(&sharedMemory1->mutex1);
+              sem_destroy(&sharedMemory2->mutex2);
               shm_unlink("/my_shared_memory1");
               shm_unlink("/my_shared_memory2");
-      
+          
               // evaluate the detection results of the AI Object Detection service
               for (const auto& result : detectionResults) {
                 // Verify if result.label is equal to one of the values defined in objects_for_detection
@@ -1005,9 +1002,9 @@ int main() {
                       putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y + 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2); 
                       }
                       else {
-                    putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y - 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2);
+                         putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y - 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2);
+                      }
                     }
-                  }
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
                   string AI_object_picture_filename = prefix_output_picture + time_now_buf + "_" + result.label + ".jpg";
@@ -1021,6 +1018,8 @@ int main() {
                       thread emailThread(sendEmails, show_email_status_msg_on_display_console, mail_email_pictures, smtpServer, smtpPort, username, password, senderEmail, recipientEmail, subject, body, AI_object_picture_file_fullpathname, AI_object_picture_filename );
                       // Detach the thread so it runs independently
                       emailThread.detach();
+                      AI_object_picture_filename.clear();
+                      AI_object_picture_file_fullpathname.clear();
                   }
 
                   } // END if (found) 
