@@ -55,7 +55,8 @@ mycMotDetRecPyB                  is the C++ program to start on Raspberry Pi 4 (
 mycMotDetRecPyB_config.ini       contains all settings to control the program and access the camera stream and optional an AI Object Detection server
 mycMotDetRecPyB.cpp              contains the C++ source code
 
-FEATURES:
+FEATURES
+========
 Note that i have added some variants in one of my repositories.
 
 The latest apps are doing the following once configured via a simple  .ini file and started in a terminal(console) on raspberry pi (or other linux e.g. Ubuntu)
