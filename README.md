@@ -1,7 +1,8 @@
 MOTION DETECTION WITH RECORDING AND OBJECT IDENTIFICATION ON AN IP CAMERA SUPPORTING ONVIF (PROFILE S).
+=======================================================================================================
 
 Required files
-..............
+--------------
 mycMotDetRecPy                  is the C++ program to start on Raspberry Pi 4 /(64Bit Bookworm) in a terminal with ./mycMotDetRecPy, with suffix Ubuntu it stands for Ubuntu 64 bit 23.10)
 mycMotDetRecPy_config.ini       contains all settings to control the program and access the camera stream and optional an AI Object Detection server
 mycMotDetRecPy.cpp              contains the C++ source code
@@ -12,7 +13,7 @@ INIReader_DUMMY.h               a dummy, download the original INIReader.h from 
 INIReader.h                     a missing file! required to download yourself, see line above
 
 Capabilities
-............
+------------
 - 2 Possible methods for Motion Detection
   Method 1: consumes more power, motion detection is done by detection of changes between frames using a Background subtraction method (choose between "KNN" or "MOG2")
             you configure once the sensitivity of detection and a Mask to exclude certain areas of the camera picture for Motion detection. 
@@ -110,7 +111,8 @@ Plenty of research and examples, trial and errors were needed to get it working.
  
 Now I am done.... although never say never...
 
-Some usage guidelines:
+Some usage guidelines
+---------------------
 - First note that the configuration settings in mycMotDetRecPy_config.ini MUST be adapted to your situation else it won't work!
 - To get the correct Recording settings for your camera and connection speed to the computer where you run this program you need to experiment with the following values:
     buffer_before_motion = 3                   ; Int default 5 s
@@ -124,7 +126,7 @@ Some usage guidelines:
 - Set parameter show_timing_for_recording = Yes  during this testing
 
 Compilation guideline 
-.....................
+---------------------
 (copied from top of the source code file mycMotDetRecPy.cpp)
 /* PUT INIReader.h in same directory as this C++ program mycMotDetRec.cpp
  * You find INIReader.h at https://github.com/benhoyt/inih/blob/master/cpp/INIReader.h
@@ -141,6 +143,6 @@ Compilation guideline
  * sudo apt-get install libcurl4-openssl-dev
  * 
  * COMPILE NOW THIS PROGRAM WITH THIS COMMAND, ASSUMING YOU HAVE INSTALLED ALL LIBs op opencv, libcur and jsonccp
- * g++  mycMotDetRec.cpp -o mycMotDetRec   -I/usr/include/opencv4 -I/usr/include -lopencv_videoio -lopencv_video -lopencv_videostab -lopencv_core -lopencv_imgproc -lopencv_objdetect -lopencv_highgui -lopencv_imgcodecs -ljsoncpp  -lcurl
+ * g++  mycMotDetRec.cpp -o mycMotDetRec   -I/usr/include/opencv4 -I/usr/include -lopencv_videoio -lopencv_video -lopencv_videostab -lopencv_core -lopencv_imgproc -lopencv_objdetect -lopencv_highgui -lopencv_imgcodecs -ljsoncpp  -lcurl -lopenssl -lcrypto
  *
 */
