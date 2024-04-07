@@ -79,18 +79,12 @@ struct DetectionResult {
 
 const int BUFFER_SIZE = 2048;
 
-struct SharedMemory1 {
-    char message1[BUFFER_SIZE];
-    sem_t mutex1;
+struct SharedMemory {
+    char message[BUFFER_SIZE];
+    sem_t mutex;
 };
 
-struct SharedMemory2 {
-    char message2[BUFFER_SIZE];
-    sem_t mutex2;
-};
-
-
-void getTapoMessages(SharedMemory1* sharedMemory1) {
+void getTapoMessages(SharedMemory* sharedMemory) {
 
       PyObject *pModuleName, *pModule, *pFunc;
       PyObject *pArgs, *pTupleValue, *pValue;
@@ -135,9 +129,10 @@ void getTapoMessages(SharedMemory1* sharedMemory1) {
                       // std::cout << "Saved string value: " << savedString << std::endl;
                       //std::cout << savedString << std::endl;
                       // Write result to shared memory
-                      sem_wait(&sharedMemory1->mutex1);
-                      snprintf(sharedMemory1->message1, BUFFER_SIZE, "%s", savedString);
-                      sem_post(&sharedMemory1->mutex1);                      
+                      sem_wait(&sharedMemory->mutex);
+                      //snprintf(sharedMemory->message, BUFFER_SIZE, "AsyncTask1: IntValue = %d, StringValue = %s", intValue, stringValue.c_str());
+                      snprintf(sharedMemory->message, BUFFER_SIZE, "%s", savedString);
+                      sem_post(&sharedMemory->mutex);                      
                   }
                   Py_DECREF(pValue);
               }
@@ -171,7 +166,7 @@ size_t write_data(void *ptr, size_t size, size_t nmemb, string *data) {
     return size * nmemb;
 }
 
-void postImageAndGetResponse(SharedMemory2* sharedMemory2, string& AIserverUrl, string& min_confidence, Mat& frame, string& show_AIResponse_message, string& show_AIObjDetectionResult, string& curl_debug_message_on) {
+void postImageAndGetResponse(SharedMemory* sharedMemory, string& AIserverUrl, string& min_confidence, Mat& frame, string& show_AIResponse_message, string& show_AIObjDetectionResult, string& curl_debug_message_on) {
     CURL *curl;
     CURLcode res;
     string response_data;
@@ -184,9 +179,10 @@ void postImageAndGetResponse(SharedMemory2* sharedMemory2, string& AIserverUrl, 
         // Convert the frame to JPEG format
         vector<uchar> buffer;
         //buffer for coding 
-        vector<int> param(2);
-        param[0] = cv::IMWRITE_JPEG_QUALITY; param[1] = 100; //default(95) 0-100 
-        cv::imencode(".jpg", frame, buffer, param);         
+        //vector<int> param(2);
+        //param[0] = cv::IMWRITE_JPEG_QUALITY; param[1] = 100; //default(95) 0-100 
+        //cv::imencode(".jpg", frame, buffer, param);         
+        cv::imencode(".jpg", frame, buffer);         
         // Save the frame into a file
         // imwrite("./temp_frame.jpg", frame); //
         // Mat frame = imread("./temp_frame.jpg"); // Load your image here.
@@ -240,9 +236,10 @@ void postImageAndGetResponse(SharedMemory2* sharedMemory2, string& AIserverUrl, 
       // Simulate some time-consuming operation
       // sleep(3);
       // Write result to shared memory
-      sem_wait(&sharedMemory2->mutex2);
-      snprintf(sharedMemory2->message2, BUFFER_SIZE, "%s", response_data.c_str());
-      sem_post(&sharedMemory2->mutex2);
+      sem_wait(&sharedMemory->mutex);
+      // snprintf(sharedMemory->message, BUFFER_SIZE, "AsyncTask2: IntValue = %d, StringValue = %s", intValue, stringValue.c_str());
+      snprintf(sharedMemory->message, BUFFER_SIZE, "%s", response_data.c_str());
+      sem_post(&sharedMemory->mutex);
 }
 
 
@@ -253,15 +250,15 @@ int main() {
     
     // Create shared memory for getTapoMessages
     int shm_fd1 = shm_open("/my_shared_memory1", O_CREAT | O_RDWR, 0666);
-    ftruncate(shm_fd1, sizeof(SharedMemory1));
-    SharedMemory1* sharedMemory1 = (SharedMemory1*)mmap(NULL, sizeof(SharedMemory1), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd1, 0);
-    sem_init(&sharedMemory1->mutex1, 1, 1); // Initialize semaphore for getTapoMessages
+    ftruncate(shm_fd1, sizeof(SharedMemory));
+    SharedMemory* sharedMemory1 = (SharedMemory*)mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd1, 0);
+    sem_init(&sharedMemory1->mutex, 1, 1); // Initialize semaphore for getTapoMessages
 
     // Create shared memory for postImageAndGetResponse
     int shm_fd2 = shm_open("/my_shared_memory2", O_CREAT | O_RDWR, 0666);
-    ftruncate(shm_fd2, sizeof(SharedMemory2));
-    SharedMemory2* sharedMemory2 = (SharedMemory2*)mmap(NULL, sizeof(SharedMemory2), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd2, 0);
-    sem_init(&sharedMemory2->mutex2, 1, 1); // Initialize semaphore for postImageAndGetResponse
+    ftruncate(shm_fd2, sizeof(SharedMemory));
+    SharedMemory* sharedMemory2 = (SharedMemory*)mmap(NULL, sizeof(SharedMemory), PROT_READ | PROT_WRITE, MAP_SHARED, shm_fd2, 0);
+    sem_init(&sharedMemory2->mutex, 1, 1); // Initialize semaphore for postImageAndGetResponse
 
     pid_t pid1 = fork();
     if (pid1 == 0) {
@@ -540,9 +537,9 @@ int main() {
           
           if (camera_event_detection_by_python == "Yes") {
                 // Read result from shared memory for getTapoMessages
-                sem_wait(&sharedMemory1->mutex1);
-                std::string messages_data(sharedMemory1->message1);
-                sem_post(&sharedMemory1->mutex1);
+                sem_wait(&sharedMemory1->mutex);
+                std::string messages_data(sharedMemory1->message);
+                sem_post(&sharedMemory1->mutex);
                       
                 if (show_motion_fps_date_msg_on_display_console == "Yes") {
                   // put frame number and time on screen
@@ -717,12 +714,12 @@ int main() {
               postImageAndGetResponse(sharedMemory2,  AIserverUrl,  min_confidence,  frame,  show_AIResponse_message,  show_AIObjDetectionResult, curl_debug_message_on);                      
 
               // Read result from shared memory for postImageAndGetResponse
-              sem_wait(&sharedMemory2->mutex2);
-              std::string response_data(sharedMemory2->message2);
-              sem_post(&sharedMemory2->mutex2);
+              sem_wait(&sharedMemory2->mutex);
+              std::string response_data(sharedMemory2->message);
+              sem_post(&sharedMemory2->mutex);
               
               // check if there is some content in the shared buffer
-              if (strlen(sharedMemory2->message2) > 0) {
+              if (strlen(sharedMemory2->message) > 0) {
                 // Print the result for postImageAndGetResponse
                 // std::cout << "Result from postImageAndGetResponse asynchronous task: " << response_data << std::endl;
                 
@@ -771,8 +768,8 @@ int main() {
               } // END of if (strlen(sharedMemory2->message) > 0)
 
               // Clean up
-              sem_destroy(&sharedMemory1->mutex1);
-              sem_destroy(&sharedMemory2->mutex2);
+              sem_destroy(&sharedMemory1->mutex);
+              sem_destroy(&sharedMemory2->mutex);
               shm_unlink("/my_shared_memory1");
               shm_unlink("/my_shared_memory2");
       

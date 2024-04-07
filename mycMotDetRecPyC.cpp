@@ -58,7 +58,7 @@
 using namespace cv;
 using namespace std;
 
-const int MAIL_BUFFER_SIZE = 1024;
+const int MAIL_BUFFER_SIZE = 5120;
 
 string base64_encode(const string &input) {
     BIO *bio, *b64;
@@ -75,7 +75,7 @@ string base64_encode(const string &input) {
     return result;
 }
 
-string buildAttachment(string &filename, const string &data) {
+string buildAttachment(const string &filename, const string &data) {
     stringstream attachment;
     attachment << "--boundary\r\n";
     attachment << "Content-Type: image/jpeg\r\n";
@@ -88,7 +88,7 @@ string buildAttachment(string &filename, const string &data) {
 void sendEmails(string show_email_status_msg_on_display_console, string mail_email_pictures, 
      const char* smtpServer, const int smtpPort, const char* username, const char* password, 
      const char* senderEmail, const char* recipientEmail, const char* subject, const char* body, 
-     string attachment_file_fullpathname, string attachment_filename ) {
+     const string attachment_file_fullpathname, const string attachment_filename ) {
 
     if (show_email_status_msg_on_display_console == "Yes") {
       cout << "***  MAIL INFORMATION" << endl;
@@ -144,6 +144,7 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }
 
+
     // Send EHLO command
     string ehloCommand = "EHLO client\r\n";
     send(clientSocket, ehloCommand.c_str(), ehloCommand.size(), 0);
@@ -196,6 +197,7 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }    
 
+
     // Send base64 encoded username
     string usernameBase64 = base64_encode(username);
     SSL_write(ssl, (usernameBase64 + "\r\n").c_str(), usernameBase64.size() + 2);
@@ -232,6 +234,7 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }   
 
+
     // Send DATA command
     string dataCommand = "DATA\r\n";
     SSL_write(ssl, dataCommand.c_str(), dataCommand.size());
@@ -241,6 +244,7 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       cout << buffer << endl;
     }
    
+
     if (show_email_status_msg_on_display_console == "Yes") {
       cout << "***  Send email headers and body" << endl;
     }
@@ -262,8 +266,6 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
       if (file) {
           string attachment((istreambuf_iterator<char>(file)), (istreambuf_iterator<char>()));
           emailData += buildAttachment(attachment_filename, attachment);
-          attachment.clear();
-          attachment_filename.clear();
           file.close();
       } else {
           cerr << "Error: Failed to open JPG file." << endl;
@@ -290,7 +292,6 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
     // Send email data
     SSL_write(ssl, emailData.c_str(), emailData.size());
     SSL_read(ssl, buffer, MAIL_BUFFER_SIZE);
-    emailData.clear();
     if (show_email_status_msg_on_display_console == "Yes") {
       cout << "***  Response after send email data" << endl;
       cout << buffer << endl;
@@ -325,13 +326,16 @@ void sendEmails(string show_email_status_msg_on_display_console, string mail_ema
 }
 
 
+
+
 VideoWriter outputVideo;
+
 
 // Define the function to be called when ctrl-c (SIGINT) is sent to process
 void signal_callback_handler(int signum) {
-    cout << "Caught signal CTRL-c. Program stops."  << endl;
-    // Terminate program
-    exit(signum);
+   cout << "Caught signal CTRL-c. Program stops."  << endl;
+   // Terminate program
+   exit(signum);
 }
 
 // Function to split a string by delimiter
@@ -354,7 +358,7 @@ struct DetectionResult {
 };
 
 
-const int BUFFER_SIZE = 1024;
+const int BUFFER_SIZE = 2048;
 
 struct SharedMemory1 {
     char message1[BUFFER_SIZE];
@@ -463,9 +467,10 @@ void postImageAndGetResponse(SharedMemory2* sharedMemory2, string& AIserverUrl, 
         // Convert the frame to JPEG format
         vector<uchar> buffer;
         //buffer for coding 
-        vector<int> param(2);
-        param[0] = cv::IMWRITE_JPEG_QUALITY; param[1] = 100; //default(95) 0-100 
-        cv::imencode(".jpg", frame, buffer, param);         
+        //vector<int> param(2);
+        //param[0] = cv::IMWRITE_JPEG_QUALITY; param[1] = 100; //default(95) 0-100 
+        // cv::imencode(".jpg", frame, buffer, param);         
+        cv::imencode(".jpg", frame, buffer);         
         // Save the frame into a file
         // imwrite("./temp_frame.jpg", frame); //
         // Mat frame = imread("./temp_frame.jpg"); // Load your image here.
@@ -679,18 +684,18 @@ int main() {
     sem_init(&sharedMemory2->mutex2, 1, 1); // Initialize semaphore for postImageAndGetResponse
 
 
+
     pid_t pid1 = fork();
     if (pid1 == 0) {
         // Child process (getTapoMessages)
         getTapoMessages(sharedMemory1, moduleName, functionName);
-        // Clean up
-        sem_destroy(&sharedMemory1->mutex1);
-        shm_unlink("/my_shared_memory1");        
         return 0;  // required!
     } else if (pid1 > 0) {
         // Parent process (main)
         // Do other work while getTapoMessages is running...
    
+        
+ 
         // Load the DUMMY mask. The black areas's in the mask are always excluded from Motion detection!
         vector<Point> my_poly = {Point(0, 0), Point(2560,0), Point(2560, 1440), Point(0, 1440)};
         Mat mask  = Mat::zeros(1, 1, CV_8U);
@@ -753,7 +758,7 @@ int main() {
         
         int bufferSeconds = buffer_before_motion;
         // Set buffer size in frames
-        int bufferSize = bufferSeconds * fps;
+        long unsigned int bufferSize = bufferSeconds * fps;
         queue<Mat> frameBuffer;        
         
         while (true) {
@@ -777,48 +782,50 @@ int main() {
             if (frameBuffer.size() > bufferSize) {
                 frameBuffer.pop();  // removes first frame from buffer 
             }            
-
-            // Read result from shared memory for getTapoMessages
-            sem_wait(&sharedMemory1->mutex1);
-            string messages_data(sharedMemory1->message1);
-            sem_post(&sharedMemory1->mutex1);
             
-                  
-            if (show_motion_fps_date_msg_on_display_console == "Yes") {
-              // put frame number and time on screen
-              // [xK Erases part of the line. If n is 0 (or missing), 
-              // clear from cursor to the end of the line. 
-              // If n is 1, clear from cursor to beginning of the line. 
-              // If n is 2, clear entire line. Cursor position does not change. 
-              time(&now);
-              strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
-              cout << "@" << str_frameCounter << " " << time_now_buf  << ". Camera: " << messages_data << "\r"; 
-            }
-            if (show_motion_fps_date_msg_on_display_window == "Yes") {
-              // put frame number and time on screen
-              time(&now);
-              strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
-              putText(frame_original, '@'+str_frameCounter + " " + time_now_buf, Point(10,frame_height - 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,255,88),2);
-            }
-                   
-            motion_detected = false;
-            
-            // Check for motion after a warm up time to avoid initial writing of a file
-            if (frameCounter >= warmup_time * fps) {
-                  // Print the result for getTapoMessages
-                  // cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << endl;
+          
 
-                  if (messages_data.rfind("Motion detected: Yes @", 0) == 0) { // pos=0 limits the search to the prefix
-                     motion_detected = true; 
-                     timeCamera = parseDate(messages_data);                    
-                  }
-                  if (messages_data.rfind("Motion detected: No @", 0) == 0) { 
-                     timeCamera = parseDate(messages_data); 
-                  }
+                // Read result from shared memory for getTapoMessages
+                sem_wait(&sharedMemory1->mutex1);
+                string messages_data(sharedMemory1->message1);
+                sem_post(&sharedMemory1->mutex1);
+                
+                      
+                if (show_motion_fps_date_msg_on_display_console == "Yes") {
+                  // put frame number and time on screen
+                  // [xK Erases part of the line. If n is 0 (or missing), 
+                  // clear from cursor to the end of the line. 
+                  // If n is 1, clear from cursor to beginning of the line. 
+                  // If n is 2, clear entire line. Cursor position does not change. 
+                  time(&now);
+                  strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
+                  cout << "@" << str_frameCounter << " " << time_now_buf  << ". Camera: " << messages_data << "\r"; 
+                }
+                if (show_motion_fps_date_msg_on_display_window == "Yes") {
+                  // put frame number and time on screen
+                  time(&now);
+                  strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
+                  putText(frame_original, '@'+str_frameCounter + " " + time_now_buf, Point(10,frame_height - 20), FONT_HERSHEY_SIMPLEX, 0.75, Scalar(0,255,88),2);
+                }
+                       
+                motion_detected = false;
+                
+                // Check for motion after a warm up time to avoid initial writing of a file
+                if (frameCounter >= warmup_time * fps) {
+                      // Print the result for getTapoMessages
+                      // cout << "frameCounter:" << frameCounter << " Result from getTapoMessages asynchronous task: " << messages_data << endl;
 
-                // Print the result
-                // cout << "Result from asynchronous task: " << messages_data << endl;
-            }  // END of if (frameCounter >= warmup_time * fps) 
+                      if (messages_data.rfind("Motion detected: Yes @", 0) == 0) { // pos=0 limits the search to the prefix
+                         motion_detected = true; 
+                         timeCamera = parseDate(messages_data);                    
+                      }
+                      if (messages_data.rfind("Motion detected: No @", 0) == 0) { 
+                         timeCamera = parseDate(messages_data); 
+                      }
+
+                    // Print the result
+                    // cout << "Result from asynchronous task: " << messages_data << endl;
+                }  // END of if (frameCounter >= warmup_time * fps) 
 
             // When motion has been detected and displays are required
             if (motion_detected) {
@@ -837,7 +844,8 @@ int main() {
  
           // This simulation is meant for test purposes e.g. to verify the AI Object detection and saving of pictures                 
           if (simulate_a_motion == "Yes") {
-              if (frameCounter > 100 and frameCounter < 300 or frameCounter > 400 and frameCounter < 600) {motion_detected = true;} else {motion_detected = false;}
+            if ((frameCounter > 100 && frameCounter < 300) || (frameCounter > 400 && frameCounter < 600)) 
+               {motion_detected = true;} else {motion_detected = false;}
           }
 
 
@@ -980,7 +988,7 @@ int main() {
               sem_destroy(&sharedMemory2->mutex2);
               shm_unlink("/my_shared_memory1");
               shm_unlink("/my_shared_memory2");
-          
+      
               // evaluate the detection results of the AI Object Detection service
               for (const auto& result : detectionResults) {
                 // Verify if result.label is equal to one of the values defined in objects_for_detection
@@ -1002,9 +1010,9 @@ int main() {
                       putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y + 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2); 
                       }
                       else {
-                         putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y - 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2);
-                      }
+                    putText(frame_original, result.label, Point(result.boundingBox.x, result.boundingBox.y - 10), FONT_HERSHEY_SIMPLEX, 0.5, Scalar(0, 255, 0), 2);
                     }
+                  }
                   time(&now);
                   strftime(time_now_buf, 21, "%Y_%m_%d_%H_%M_%S", localtime(&now));
                   string AI_object_picture_filename = prefix_output_picture + time_now_buf + "_" + result.label + ".jpg";
@@ -1018,8 +1026,6 @@ int main() {
                       thread emailThread(sendEmails, show_email_status_msg_on_display_console, mail_email_pictures, smtpServer, smtpPort, username, password, senderEmail, recipientEmail, subject, body, AI_object_picture_file_fullpathname, AI_object_picture_filename );
                       // Detach the thread so it runs independently
                       emailThread.detach();
-                      AI_object_picture_filename.clear();
-                      AI_object_picture_file_fullpathname.clear();
                   }
 
                   } // END if (found) 
